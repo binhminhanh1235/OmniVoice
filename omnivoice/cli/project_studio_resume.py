@@ -79,14 +79,10 @@ class SectionResumeProjectStudioController(ProjectStudioController):
                     reason="before forced section regeneration",
                 )
 
-        # Nothing to synthesize. Returning immediately is important after a
-        # Colab restart because completed sections must never be rendered again.
         if not targets:
             write_section_status(project)
             return project
 
-        # Queue the selected incomplete sections before expensive inference.
-        # If the runtime dies here, queued is recovered to pending on next load.
         for section_id in targets:
             set_section_status(
                 project,
@@ -107,9 +103,6 @@ class SectionResumeProjectStudioController(ProjectStudioController):
                 strict=strict,
             )
         except Exception:
-            # Preserve whatever chunk/project checkpoints were successfully
-            # written before the failure. Queued/generating sections are
-            # deliberately recoverable as pending on the next load.
             try:
                 failed = super().load_project(project.root)
                 write_section_status(failed)
@@ -130,26 +123,17 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         language: Optional[str] = "en",
         strict: bool = False,
     ) -> OmniVoiceProject:
-        # Do not delegate to the base implementation here. A verified sidecar
-        # must be invalidated before project.json is changed, otherwise a crash
-        # in that tiny window could restore the old verified section and cancel
-        # the requested regeneration.
         if not chunk_choice or "/" not in chunk_choice:
             raise ValueError("Select a chunk to regenerate")
         target = chunk_choice.split(" ", 1)[0]
         section_id, chunk_id = target.split("/", 1)
 
         project = self.load_project(project_path)
-
-        # Archive the coherent section state before invalidating one chunk.
         create_section_snapshot(
             project,
             section_id,
             reason=f"before regenerating {chunk_id}",
         )
-
-        # Sidecar-first ordering records the user's regeneration intent even if
-        # the runtime dies before mark_chunk_for_regeneration saves project.json.
         set_section_status(
             project,
             section_id,
@@ -177,6 +161,16 @@ class SectionResumeProjectStudioController(ProjectStudioController):
     ) -> list[SectionVersion]:
         project = self.load_project(project_path)
         return list_section_versions(project, section_id)
+
+    def snapshot_section(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        *,
+        reason: str = "manual snapshot",
+    ) -> Optional[SectionVersion]:
+        project = self.load_project(project_path)
+        return create_section_snapshot(project, section_id, reason=reason)
 
     def section_version_audio(
         self,
