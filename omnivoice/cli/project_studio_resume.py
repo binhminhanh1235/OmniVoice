@@ -3,7 +3,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Project Studio launcher with persistent section-level resume checkpoints."""
+"""Project Studio launcher with persistent section resume and version history."""
 
 from __future__ import annotations
 
@@ -14,7 +14,15 @@ from omnivoice.cli import project_studio as studio_module
 from omnivoice.cli import project_studio_live as live_module
 from omnivoice.cli import project_studio_plus as plus_module
 from omnivoice.cli.project_studio import ProjectStudioController
+from omnivoice.cli.section_history_ui import build_section_history_demo
 from omnivoice.project import OmniVoiceProject
+from omnivoice.section_history import (
+    SectionVersion,
+    create_section_snapshot,
+    list_section_versions,
+    restore_section_version,
+    section_version_audio,
+)
 from omnivoice.section_status import (
     ensure_section_status,
     incomplete_section_ids,
@@ -25,7 +33,7 @@ from omnivoice.section_status import (
 
 
 class SectionResumeProjectStudioController(ProjectStudioController):
-    """Project Studio controller backed by ``section-status.json`` checkpoints."""
+    """Project Studio controller backed by section checkpoints and history."""
 
     def create_project(
         self,
@@ -62,14 +70,18 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         )
         targets = incomplete_section_ids(project, requested) if resume else requested
 
-        # Nothing to synthesize. Returning immediately is important after a
-        # Colab restart because completed sections must never be rendered again.
+        if not resume:
+            for section_id in targets:
+                create_section_snapshot(
+                    project,
+                    section_id,
+                    reason="before forced section regeneration",
+                )
+
         if not targets:
             write_section_status(project)
             return project
 
-        # Queue the selected incomplete sections before expensive inference.
-        # If the runtime dies here, queued is recovered to pending on next load.
         for section_id in targets:
             set_section_status(
                 project,
@@ -90,9 +102,6 @@ class SectionResumeProjectStudioController(ProjectStudioController):
                 strict=strict,
             )
         except Exception:
-            # Preserve whatever chunk/project checkpoints were successfully
-            # written before the failure. Queued/generating sections are
-            # deliberately recoverable as pending on the next load.
             try:
                 failed = super().load_project(project.root)
                 write_section_status(failed)
@@ -113,19 +122,17 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         language: Optional[str] = "en",
         strict: bool = False,
     ) -> OmniVoiceProject:
-        # Do not delegate to the base implementation here. A verified sidecar
-        # must be invalidated before project.json is changed, otherwise a crash
-        # in that tiny window could restore the old verified section and cancel
-        # the requested regeneration.
         if not chunk_choice or "/" not in chunk_choice:
             raise ValueError("Select a chunk to regenerate")
         target = chunk_choice.split(" ", 1)[0]
         section_id, chunk_id = target.split("/", 1)
 
         project = self.load_project(project_path)
-
-        # Sidecar-first ordering records the user's regeneration intent even if
-        # the runtime dies before mark_chunk_for_regeneration saves project.json.
+        create_section_snapshot(
+            project,
+            section_id,
+            reason=f"before regenerating {chunk_id}",
+        )
         set_section_status(
             project,
             section_id,
@@ -146,9 +153,53 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         write_section_status(generated)
         return generated
 
+    def section_versions(
+        self,
+        project_path: str | Path,
+        section_id: str,
+    ) -> list[SectionVersion]:
+        project = self.load_project(project_path)
+        return list_section_versions(project, section_id)
+
+    def snapshot_section(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        *,
+        reason: str = "manual snapshot",
+    ) -> Optional[SectionVersion]:
+        project = self.load_project(project_path)
+        return create_section_snapshot(project, section_id, reason=reason)
+
+    def section_version_audio(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        version_id: str,
+    ) -> Path:
+        project = self.load_project(project_path)
+        return section_version_audio(project, section_id, version_id)
+
+    def restore_section_version(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        version_id: str,
+        *,
+        snapshot_current: bool = True,
+    ) -> OmniVoiceProject:
+        project = self.load_project(project_path)
+        restore_section_version(
+            project,
+            section_id,
+            version_id,
+            snapshot_current=snapshot_current,
+        )
+        return self.load_project(project.root)
+
 
 def _install_resume_controller() -> None:
-    """Inject the resume-aware controller into the existing Studio builders."""
+    """Inject the resume/history-aware controller into existing Studio builders."""
 
     studio_module.ProjectStudioController = SectionResumeProjectStudioController
     live_module.ProjectStudioController = SectionResumeProjectStudioController
@@ -156,8 +207,20 @@ def _install_resume_controller() -> None:
 
 
 def build_demo(model: Any, workspace: str | Path):
+    import gradio as gr
+
     _install_resume_controller()
-    return live_module.build_demo(model, workspace)
+    studio = live_module.build_demo(model, workspace)
+    history = build_section_history_demo(
+        model,
+        workspace,
+        controller_cls=SectionResumeProjectStudioController,
+    )
+    return gr.TabbedInterface(
+        [studio, history],
+        ["Studio", "Section History"],
+        title="OmniVoice Project Studio",
+    )
 
 
 def main(argv=None) -> int:

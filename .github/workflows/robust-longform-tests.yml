@@ -8,6 +8,7 @@ on:
       - "omnivoice/voice_doctor.py"
       - "omnivoice/voice_stability.py"
       - "omnivoice/section_status.py"
+      - "omnivoice/section_history.py"
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
       - "omnivoice/preview.py"
@@ -21,6 +22,7 @@ on:
       - "omnivoice/cli/project_studio_resume.py"
       - "omnivoice/cli/project_studio_text_resume.py"
       - "omnivoice/cli/project_studio_voice_doctor.py"
+      - "omnivoice/cli/section_history_ui.py"
       - "omnivoice/cli/text_doctor_ui.py"
       - "omnivoice/cli/voice_doctor_ui.py"
       - "omnivoice/__init__.py"
@@ -35,6 +37,7 @@ on:
       - "docs/adaptive-retry-pacing.md"
       - "docs/text-doctor.md"
       - "docs/section-status-resume.md"
+      - "docs/section-version-history.md"
       - "docs/voice-doctor.md"
       - "docs/voice-stability-score.md"
       - "tests/test_adaptive_quality.py"
@@ -45,6 +48,8 @@ on:
       - "tests/test_voice_stability.py"
       - "tests/test_section_status.py"
       - "tests/test_section_resume_controller.py"
+      - "tests/test_section_history.py"
+      - "tests/test_section_history_ui.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
       - "tests/test_preview.py"
@@ -72,6 +77,7 @@ on:
       - "feat/section-status-resume"
       - "feat/voice-doctor"
       - "feat/voice-stability-score"
+      - "feat/section-version-history"
 
 jobs:
   test:
@@ -112,6 +118,8 @@ jobs:
             tests/test_voice_stability.py \
             tests/test_section_status.py \
             tests/test_section_resume_controller.py \
+            tests/test_section_history.py \
+            tests/test_section_history_ui.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
             tests/test_preview.py \
