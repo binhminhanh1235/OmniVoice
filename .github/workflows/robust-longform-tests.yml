@@ -1,15 +1,17 @@
-name: Robust long-form tests
+name: Robust long-form and project tests
 
 on:
   pull_request:
     paths:
       - "omnivoice/robust_longform.py"
+      - "omnivoice/project.py"
       - "omnivoice/cli/demo_robust.py"
       - "omnivoice/__init__.py"
       - "omnivoice/models/omnivoice.py"
       - "omnivoice/utils/audio.py"
       - "pyproject.toml"
       - "tests/test_robust_longform.py"
+      - "tests/test_project.py"
       - "tests/test_demo_robust.py"
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
@@ -19,6 +21,7 @@ on:
     branches:
       - "fix/robust-longform-tts"
       - "fix/gradio-robust-longform"
+      - "feat/project-studio-p0"
 
 jobs:
   test:
@@ -46,8 +49,9 @@ jobs:
       - name: Validate Colab notebook JSON
         run: python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
 
-      - name: Run robust long-form tests
+      - name: Run robust long-form and project tests
         run: |
           pytest -q \
             tests/test_robust_longform.py \
+            tests/test_project.py \
             tests/test_demo_robust.py
