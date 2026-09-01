@@ -309,9 +309,14 @@ class ProjectQueueRunner:
     ) -> Generator[QueueEvent, None, ProjectQueueManifest]:
         manifest = self.store.recover_interrupted()
 
+        # Snapshot IDs so newly added projects join the next queue pass. Items
+        # removed before their turn are simply skipped.
         for seed in list(manifest.items):
             current_manifest = self.store.load()
-            item = self.store.find(current_manifest, seed.id)
+            try:
+                item = self.store.find(current_manifest, seed.id)
+            except KeyError:
+                continue
             if item.status in {"completed", "cancelled"}:
                 continue
             if item.status not in {"pending", "failed", "needs_review", "paused"}:
