@@ -11,6 +11,7 @@ on:
       - "omnivoice/cli/demo_robust.py"
       - "omnivoice/cli/project_studio.py"
       - "omnivoice/cli/project_studio_plus.py"
+      - "omnivoice/cli/project_studio_live.py"
       - "omnivoice/__init__.py"
       - "omnivoice/models/omnivoice.py"
       - "omnivoice/utils/audio.py"
@@ -26,6 +27,7 @@ on:
       - "tests/test_style_bank.py"
       - "tests/test_project_studio.py"
       - "tests/test_project_studio_preview_ui.py"
+      - "tests/test_project_studio_live_ui.py"
       - "tests/test_demo_robust.py"
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
@@ -79,4 +81,5 @@ jobs:
             tests/test_style_bank.py \
             tests/test_project_studio.py \
             tests/test_project_studio_preview_ui.py \
+            tests/test_project_studio_live_ui.py \
             tests/test_demo_robust.py
