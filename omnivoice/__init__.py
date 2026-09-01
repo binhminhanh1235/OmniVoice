@@ -50,6 +50,14 @@ from omnivoice.project import (
     StyleProfile,
     parse_project_script,
 )
+from omnivoice.reference_segment import (
+    ReferenceSegmentCandidate,
+    ReferenceSegmentConfig,
+    ReferenceSegmentResult,
+    export_reference_segment,
+    find_reference_segments,
+    save_reference_segment_report,
+)
 from omnivoice.robust_longform import (
     RobustLongFormConfig,
     RobustLongFormGenerator,
@@ -122,6 +130,12 @@ __all__ = [
     "OmniVoiceStyleResolver",
     "DEFAULT_STYLE_PROFILES",
     "parse_project_script",
+    "ReferenceSegmentConfig",
+    "ReferenceSegmentCandidate",
+    "ReferenceSegmentResult",
+    "find_reference_segments",
+    "export_reference_segment",
+    "save_reference_segment_report",
     "SECTION_STATUS_NAME",
     "SectionStatusRestore",
     "ensure_section_status",

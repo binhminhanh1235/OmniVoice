@@ -3,19 +3,37 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Voice Doctor UI: analyze once, save once, optionally run clone stability tests."""
+"""Voice Doctor UI: find, analyze, save, and stability-test voice references."""
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, Optional
 
+from omnivoice.reference_segment import (
+    ReferenceSegmentConfig,
+    export_reference_segment,
+    find_reference_segments,
+    save_reference_segment_report,
+)
 from omnivoice.voice_doctor import VoiceDoctorReport, analyze_voice_reference
 from omnivoice.voice_library import VoiceLibrary
 from omnivoice.voice_stability import VoiceStabilityReport, evaluate_voice_stability
 
 
 METRIC_HEADERS = ["Metric", "Value", "Guidance"]
+SEGMENT_HEADERS = [
+    "Rank",
+    "Start",
+    "End",
+    "Score",
+    "RMS",
+    "Silence",
+    "Clipping",
+    "Dynamic",
+    "Issues",
+]
 STABILITY_HEADERS = [
     "Sample",
     "Pass",
@@ -116,12 +134,14 @@ def build_voice_doctor_demo(
     model: Any = None,
     workspace: str | Path | None = None,
 ):
-    """Build analysis-only UI or full analyze/save/stability UI."""
+    """Build analysis-only UI or full segment/analyze/save/stability UI."""
 
     import gradio as gr
 
     can_save = model is not None and workspace is not None
-    library = VoiceLibrary(Path(workspace).expanduser() / "voices") if can_save else None
+    can_segment = workspace is not None
+    workspace_path = Path(workspace).expanduser() if workspace is not None else None
+    library = VoiceLibrary(workspace_path / "voices") if can_save and workspace_path else None
     initial_voices = library.voice_names() if library is not None else []
     initial_stability_voice = initial_voices[0] if initial_voices else None
     initial_stability_variants = (
@@ -138,6 +158,90 @@ def build_voice_doctor_demo(
         except Exception as exc:
             raise gr.Error(f"Voice Doctor failed: {type(exc).__name__}: {exc}")
         return _format_report(report)
+
+    def find_segments(audio_path, segment_seconds):
+        if not can_segment or workspace_path is None:
+            raise gr.Error("Auto reference segment requires a Studio workspace.")
+        if not audio_path:
+            raise gr.Error("Upload a long reference audio file first.")
+        try:
+            config = ReferenceSegmentConfig(
+                segment_seconds=float(segment_seconds),
+                hop_seconds=0.75,
+                max_candidates=5,
+                min_spacing_seconds=2.0,
+            )
+            result = find_reference_segments(audio_path, config)
+            source = Path(audio_path)
+            stat = source.stat()
+            key = hashlib.sha1(
+                f"{source.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{config.segment_seconds}".encode()
+            ).hexdigest()[:12]
+            output_dir = workspace_path / "reference_candidates" / key
+            output_dir.mkdir(parents=True, exist_ok=True)
+            save_reference_segment_report(result, output_dir / "candidates.json")
+
+            choices = []
+            rows = []
+            best_path = None
+            for candidate in result.candidates:
+                candidate_path = export_reference_segment(
+                    result,
+                    candidate.rank,
+                    output_dir / f"candidate_{candidate.rank:02d}.wav",
+                )
+                label = (
+                    f"#{candidate.rank} · {candidate.start_seconds:.2f}-{candidate.end_seconds:.2f}s "
+                    f"· score {candidate.score}"
+                )
+                choices.append((label, str(candidate_path)))
+                if candidate.rank == 1:
+                    best_path = str(candidate_path)
+                rows.append(
+                    [
+                        candidate.rank,
+                        f"{candidate.start_seconds:.2f}s",
+                        f"{candidate.end_seconds:.2f}s",
+                        candidate.score,
+                        f"{candidate.rms_dbfs:.1f} dBFS",
+                        f"{candidate.silence_ratio * 100:.1f}%",
+                        f"{candidate.clipping_ratio * 100:.4f}%",
+                        f"{candidate.dynamic_range_db:.1f} dB",
+                        ", ".join(candidate.issues) or "none",
+                    ]
+                )
+            if not choices:
+                raise RuntimeError("No reference candidates found")
+            return (
+                rows,
+                gr.update(choices=choices, value=best_path),
+                best_path,
+                (
+                    f"Found {len(choices)} candidates from {result.duration_seconds:.1f}s source. "
+                    f"Best score: {result.best.score}/100. Listen before using it."
+                ),
+            )
+        except Exception as exc:
+            raise gr.Error(f"Segment search failed: {type(exc).__name__}: {exc}")
+
+    def preview_segment(candidate_path):
+        return candidate_path or None
+
+    def use_segment(candidate_path):
+        if not candidate_path:
+            raise gr.Error("Select a candidate first.")
+        return candidate_path, "Selected candidate is now the active Reference audio. Run Analyze before saving."
+
+    def transcribe_segment(candidate_path):
+        if model is None:
+            raise gr.Error("Transcript suggestion requires the loaded OmniVoice/ASR model.")
+        if not candidate_path:
+            raise gr.Error("Select a candidate first.")
+        try:
+            transcript = model.transcribe(candidate_path)
+        except Exception as exc:
+            raise gr.Error(f"Transcription failed: {type(exc).__name__}: {exc}")
+        return transcript, "ASR transcript inserted as a suggestion. Review it against the audio before saving."
 
     def refresh_stability_voices(preferred=None):
         if library is None:
@@ -233,11 +337,39 @@ def build_voice_doctor_demo(
     with gr.Blocks(title="Voice Doctor") as demo:
         gr.Markdown(
             "# Voice Doctor\n"
-            "Upload the reference **once**. Analyze it, save the same file directly to "
-            "Voice Library, then optionally run three real clone tests."
+            "Upload a clean short reference directly, or upload a longer recording and let Studio "
+            "rank several 3–10 second candidates. You remain the final listener."
         )
         audio = gr.Audio(label="Reference audio", type="filepath")
-        analyze_button = gr.Button("Analyze reference", variant="primary")
+
+        with gr.Group(visible=can_segment):
+            gr.Markdown(
+                "## Auto Best Reference Segment\n"
+                "For long recordings, scan for clean speech windows. Candidate ranking is signal-based "
+                "and non-destructive. Listen before choosing."
+            )
+            with gr.Row():
+                segment_seconds = gr.Slider(
+                    minimum=3.0,
+                    maximum=10.0,
+                    step=0.5,
+                    value=6.0,
+                    label="Candidate length (seconds)",
+                )
+                find_segment_button = gr.Button("Find Best Segments", variant="primary")
+            segment_table = gr.Dataframe(
+                headers=SEGMENT_HEADERS,
+                interactive=False,
+                wrap=True,
+            )
+            candidate = gr.Dropdown(label="Candidate")
+            candidate_audio = gr.Audio(label="Candidate preview", type="filepath")
+            with gr.Row():
+                use_candidate_button = gr.Button("Use selected segment as reference")
+                transcribe_candidate_button = gr.Button("Suggest transcript with ASR")
+            segment_status = gr.Markdown("No candidate search yet.")
+
+        analyze_button = gr.Button("Analyze reference")
         summary = gr.Markdown("Upload a reference and run Voice Doctor.")
         metrics = gr.Dataframe(headers=METRIC_HEADERS, interactive=False, wrap=True)
         with gr.Row():
@@ -303,6 +435,29 @@ def build_voice_doctor_demo(
             inputs=audio,
             outputs=[summary, metrics, issues, recommendations],
         )
+
+        if can_segment:
+            find_segment_button.click(
+                find_segments,
+                inputs=[audio, segment_seconds],
+                outputs=[segment_table, candidate, candidate_audio, segment_status],
+            )
+            candidate.change(
+                preview_segment,
+                inputs=candidate,
+                outputs=candidate_audio,
+            )
+            use_candidate_button.click(
+                use_segment,
+                inputs=candidate,
+                outputs=[audio, segment_status],
+            )
+            if model is not None and can_save:
+                transcribe_candidate_button.click(
+                    transcribe_segment,
+                    inputs=candidate,
+                    outputs=[ref_text, segment_status],
+                )
 
         if can_save:
             save_button.click(
