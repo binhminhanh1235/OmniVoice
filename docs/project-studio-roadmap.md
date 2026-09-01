@@ -11,6 +11,8 @@ This roadmap prioritizes the workflow for long-form narrated projects on Google 
 - [x] Separate section WAV files
 - [x] Robust per-chunk verification
 - [x] Checkpoint / resume
+- [x] Persistent `section-status.json` checkpoint with crash-safe section resume
+- [x] Skip completed sections after reload; resume only incomplete sections
 - [x] Regenerate one chunk only
 - [x] Merge verified sections into `full.wav`
 - [x] Persistent Voice Library / cached `VoiceClonePrompt`
@@ -26,7 +28,7 @@ This roadmap prioritizes the workflow for long-form narrated projects on Google 
 - [x] Preview three representative samples before full rendering.
 - [x] Adaptive retry based on failure reason: repetition, omission, pacing, text mismatch.
 - [x] Pacing anomaly detector with global fallback and optional Whisper word timestamps.
-- [ ] Text Doctor: HTML/Unicode/number/abbreviation cleanup with visible diff.
+- [x] Text Doctor: HTML/Unicode cleanup plus visible diff and review hints for semantic changes.
 - [ ] Voice Doctor: reference duration/noise/clipping/silence checks.
 - [ ] Voice Stability Score from short clone probes.
 - [ ] Section/chunk version history instead of overwriting the previous good output.

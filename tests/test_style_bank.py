@@ -5,6 +5,7 @@ import numpy as np
 from omnivoice import VoiceClonePrompt
 from omnivoice.project import OmniVoiceProject
 from omnivoice.robust_longform import RobustLongFormConfig
+from omnivoice.section_status import SECTION_STATUS_NAME
 from omnivoice.style_bank import StyleBankProjectRunner
 from omnivoice.voice_library import VoiceLibrary
 
@@ -58,11 +59,24 @@ class FakeModel:
         return [np.full(max(800, len(text) * 20), 0.01, dtype=np.float32)]
 
 
-def test_style_bank_uses_reference_variant_per_beat(tmp_path):
+def _voices(tmp_path):
     voices = VoiceLibrary(tmp_path / "voices")
     voices.save_prompt("David", _prompt("default"), variant="DEFAULT")
     voices.save_prompt("David", _prompt("warm"), variant="WARM")
     voices.save_prompt("David", _prompt("soft"), variant="SOFT")
+    return voices
+
+
+def _robust_without_asr():
+    return RobustLongFormConfig(
+        verify_with_asr=False,
+        max_chunk_words=30,
+        max_chunk_chars=240,
+    )
+
+
+def test_style_bank_uses_reference_variant_per_beat(tmp_path):
+    voices = _voices(tmp_path)
 
     project = OmniVoiceProject.create(
         SCRIPT,
@@ -79,11 +93,7 @@ def test_style_bank_uses_reference_variant_per_beat(tmp_path):
     )
     runner.generate(
         project,
-        robust_config=RobustLongFormConfig(
-            verify_with_asr=False,
-            max_chunk_words=30,
-            max_chunk_chars=240,
-        ),
+        robust_config=_robust_without_asr(),
         language="en",
     )
 
@@ -116,12 +126,16 @@ def test_style_bank_uses_reference_variant_per_beat(tmp_path):
         True,
     ]
 
+    sidecar = json.loads(
+        (project.root / SECTION_STATUS_NAME).read_text(encoding="utf-8")
+    )
+    assert {item["status"] for item in sidecar["sections"].values()} == {
+        "verified"
+    }
+
 
 def test_explicit_variant_locks_whole_project(tmp_path):
-    voices = VoiceLibrary(tmp_path / "voices")
-    voices.save_prompt("David", _prompt("default"), variant="DEFAULT")
-    voices.save_prompt("David", _prompt("warm"), variant="WARM")
-    voices.save_prompt("David", _prompt("soft"), variant="SOFT")
+    voices = _voices(tmp_path)
 
     project = OmniVoiceProject.create(
         SCRIPT,
@@ -138,11 +152,56 @@ def test_explicit_variant_locks_whole_project(tmp_path):
     )
     runner.generate(
         project,
-        robust_config=RobustLongFormConfig(
-            verify_with_asr=False,
-            max_chunk_words=30,
-            max_chunk_chars=240,
-        ),
+        robust_config=_robust_without_asr(),
     )
 
     assert {call["prompt_text"] for call in model.calls} == {"default"}
+
+
+def test_resume_uses_section_status_sidecar_and_does_not_rerender(tmp_path):
+    voices = _voices(tmp_path)
+    project = OmniVoiceProject.create(
+        SCRIPT,
+        tmp_path / "project",
+        max_chunk_words=30,
+        max_chunk_chars=240,
+    )
+
+    first_model = FakeModel()
+    StyleBankProjectRunner(
+        first_model,
+        voices,
+        voice_name="David",
+        preferred_variant="AUTO",
+    ).generate(
+        project,
+        robust_config=_robust_without_asr(),
+        resume=True,
+    )
+    assert len(first_model.calls) == 3
+
+    # Simulate a stale manifest after a restart/cloud sync. The independent
+    # section-status.json and existing WAVs must still protect completed work.
+    for section in project.manifest.sections:
+        section.status = "pending"
+        for beat in section.beats:
+            beat.status = "pending"
+            for chunk in beat.chunks:
+                chunk.status = "pending"
+    project.save()
+
+    reloaded = OmniVoiceProject.load(project.root)
+    second_model = FakeModel()
+    StyleBankProjectRunner(
+        second_model,
+        voices,
+        voice_name="David",
+        preferred_variant="AUTO",
+    ).generate(
+        reloaded,
+        robust_config=_robust_without_asr(),
+        resume=True,
+    )
+
+    assert second_model.calls == []
+    assert all(section.status == "verified" for section in reloaded.manifest.sections)

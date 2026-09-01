@@ -21,11 +21,8 @@ keywords = [
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
-    "Intended Audience :: Developers",
-
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
-
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
@@ -68,7 +65,7 @@ omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
 omnivoice-demo = "omnivoice.cli.demo_robust:main"
 omnivoice-demo-legacy = "omnivoice.cli.demo:main"
-omnivoice-project-studio = "omnivoice.cli.project_studio_live:main"
+omnivoice-project-studio = "omnivoice.cli.project_studio_text_resume:main"
 omnivoice-merge-lora = "omnivoice.cli.merge_lora:main"
 
 [project.urls]
