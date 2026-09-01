@@ -34,6 +34,25 @@ def _item_choices(manifest) -> list[str]:
     ]
 
 
+def _preferred_item_choice(manifest) -> str | None:
+    if not manifest.items:
+        return None
+    preferred = next(
+        (item for item in manifest.items if item.status == "running"),
+        None,
+    )
+    if preferred is None:
+        preferred = next(
+            (
+                item
+                for item in manifest.items
+                if item.status in {"pending", "paused", "failed", "needs_review"}
+            ),
+            manifest.items[0],
+        )
+    return f"{preferred.id} | {preferred.project_title} | {preferred.status.upper()}"
+
+
 def _choice_id(value: str | None) -> str:
     if not value:
         raise ValueError("Select a queue item first")
@@ -50,18 +69,56 @@ def build_project_queue_demo(
 
     controller = controller_cls(model, workspace)
     store = ProjectQueueStore(workspace)
-    # Recovery is intentionally performed once when the app starts.  A normal
+    # Recovery is intentionally performed once when the app starts. A normal
     # Refresh must never rewrite a genuinely RUNNING item while generation is
     # still active in this process.
     store.recover_interrupted()
     runner = ProjectQueueRunner(controller, store)
+
+    def project_defaults(project_path, voices=None):
+        names = list(voices if voices is not None else controller.voices.voice_names())
+        preferred_voice = names[0] if names else None
+        preferred_variant = None
+        language = "en"
+        title = None
+
+        if project_path:
+            project = controller.load_project(project_path)
+            title = project.manifest.title
+            settings = controller.load_project_settings(project)
+            saved_voice = settings.get("voice_name")
+            if saved_voice in names:
+                preferred_voice = saved_voice
+            language = settings.get("language") or "en"
+
+            variants = (
+                controller.voices.variant_choices(preferred_voice)
+                if preferred_voice
+                else []
+            )
+            saved_variant = (settings.get("voice_variant") or "AUTO").upper()
+            if saved_variant in variants:
+                preferred_variant = saved_variant
+            elif "AUTO" in variants:
+                preferred_variant = "AUTO"
+            elif variants:
+                preferred_variant = variants[0]
+            return preferred_voice, variants, preferred_variant, language, title
+
+        variants = (
+            controller.voices.variant_choices(preferred_voice)
+            if preferred_voice
+            else []
+        )
+        preferred_variant = "AUTO" if "AUTO" in variants else (variants[0] if variants else None)
+        return preferred_voice, variants, preferred_variant, language, title
 
     def queue_updates(message: str = ""):
         manifest = store.load()
         choices = _item_choices(manifest)
         return (
             queue_rows(manifest),
-            gr.update(choices=choices, value=(choices[0] if choices else None)),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
             message or f"Queue has {len(manifest.items)} project(s).",
         )
 
@@ -69,45 +126,47 @@ def build_project_queue_demo(
         projects = controller.list_projects()
         voices = controller.voices.voice_names()
         project_value = projects[0] if projects else None
-        voice_value = voices[0] if voices else None
-        variants = controller.voices.variant_choices(voice_value) if voice_value else []
+        voice_value, variants, variant_value, language_value, title = project_defaults(
+            project_value,
+            voices,
+        )
         manifest = store.load()
         choices = _item_choices(manifest)
+        note = (
+            f"Loaded saved settings for {title!r}. " if title else ""
+        ) + f"Found {len(projects)} project(s), {len(voices)} voice(s), {len(manifest.items)} queued item(s)."
         return (
             gr.update(choices=projects, value=project_value),
             gr.update(choices=voices, value=voice_value),
-            gr.update(choices=variants, value=("AUTO" if variants else None)),
+            gr.update(choices=variants, value=variant_value),
+            language_value,
             queue_rows(manifest),
-            gr.update(choices=choices, value=(choices[0] if choices else None)),
-            f"Found {len(projects)} project(s), {len(voices)} voice(s), {len(manifest.items)} queued item(s).",
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+            note,
         )
 
     def project_settings(project_path):
         if not project_path:
             return gr.update(), gr.update(), "en", "Choose a project."
-        project = controller.load_project(project_path)
-        settings = controller.load_project_settings(project)
         voices = controller.voices.voice_names()
-        preferred_voice = settings.get("voice_name")
-        if preferred_voice not in voices:
-            preferred_voice = voices[0] if voices else None
-        variants = controller.voices.variant_choices(preferred_voice) if preferred_voice else []
-        preferred_variant = (settings.get("voice_variant") or "AUTO").upper()
-        if preferred_variant not in variants:
-            preferred_variant = "AUTO" if "AUTO" in variants else (variants[0] if variants else None)
-        language = settings.get("language") or "en"
+        voice_value, variants, variant_value, language_value, title = project_defaults(
+            project_path,
+            voices,
+        )
         return (
-            gr.update(choices=voices, value=preferred_voice),
-            gr.update(choices=variants, value=preferred_variant),
-            language,
-            f"Loaded saved settings for {project.manifest.title!r}.",
+            gr.update(choices=voices, value=voice_value),
+            gr.update(choices=variants, value=variant_value),
+            language_value,
+            f"Loaded saved settings for {title!r}.",
         )
 
     def voice_variants(voice_name):
         variants = controller.voices.variant_choices(voice_name) if voice_name else []
-        return gr.update(choices=variants, value=("AUTO" if variants else None))
+        return gr.update(choices=variants, value=("AUTO" if "AUTO" in variants else (variants[0] if variants else None)))
 
     def enqueue(project_path, voice_name, variant, language, strict, auto_merge):
+        if not project_path:
+            raise gr.Error("Choose a project first.")
         try:
             item = store.enqueue(
                 controller,
@@ -161,19 +220,17 @@ def build_project_queue_demo(
         choices = _item_choices(manifest)
         yield (
             queue_rows(manifest),
-            gr.update(choices=choices, value=(choices[0] if choices else None)),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
             "▶ Queue started. Projects run top-to-bottom; each project resumes incomplete sections only.",
         )
         try:
             for event in runner.run(continue_on_error=bool(continue_on_error)):
                 manifest = store.load()
                 choices = _item_choices(manifest)
-                where = (
-                    f" · {event.current_section}" if event.current_section else ""
-                )
+                where = f" · {event.current_section}" if event.current_section else ""
                 yield (
                     queue_rows(manifest),
-                    gr.update(choices=choices, value=(choices[0] if choices else None)),
+                    gr.update(choices=choices, value=_preferred_item_choice(manifest)),
                     f"**{event.status.upper()}** · {event.project_title or 'Queue'}{where}\n\n{event.message}",
                 )
         except Exception as exc:
@@ -181,7 +238,7 @@ def build_project_queue_demo(
             choices = _item_choices(manifest)
             yield (
                 queue_rows(manifest),
-                gr.update(choices=choices, value=(choices[0] if choices else None)),
+                gr.update(choices=choices, value=_preferred_item_choice(manifest)),
                 f"❌ Queue runner error: {type(exc).__name__}: {exc}",
             )
             return
@@ -191,15 +248,20 @@ def build_project_queue_demo(
         pending = sum(item.status not in {"completed", "cancelled"} for item in manifest.items)
         yield (
             queue_rows(manifest),
-            gr.update(choices=choices, value=(choices[0] if choices else None)),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
             f"Queue pass finished. {pending} item(s) still need work/review.",
         )
 
     initial_projects = controller.list_projects()
     initial_voices = controller.voices.voice_names()
     initial_project = initial_projects[0] if initial_projects else None
-    initial_voice = initial_voices[0] if initial_voices else None
-    initial_variants = controller.voices.variant_choices(initial_voice) if initial_voice else []
+    (
+        initial_voice,
+        initial_variants,
+        initial_variant,
+        initial_language,
+        initial_title,
+    ) = project_defaults(initial_project, initial_voices)
     initial_manifest = store.load()
     initial_items = _item_choices(initial_manifest)
 
@@ -224,14 +286,16 @@ def build_project_queue_demo(
             variant = gr.Dropdown(
                 label="Variant",
                 choices=initial_variants,
-                value=("AUTO" if "AUTO" in initial_variants else (initial_variants[0] if initial_variants else None)),
+                value=initial_variant,
             )
-            language = gr.Textbox(label="Language", value="en")
+            language = gr.Textbox(label="Language", value=initial_language)
         with gr.Row():
             strict = gr.Checkbox(label="Strict verification", value=False)
             auto_merge = gr.Checkbox(label="Auto-merge full.wav when project completes", value=True)
             add_button = gr.Button("Add Project to Queue", variant="primary")
-        add_status = gr.Markdown("Select a project and add it to the queue.")
+        add_status = gr.Markdown(
+            f"Loaded saved settings for {initial_title!r}." if initial_title else "Select a project and add it to the queue."
+        )
 
         gr.Markdown("## Queue")
         queue_table = gr.Dataframe(
@@ -244,7 +308,7 @@ def build_project_queue_demo(
             queue_item = gr.Dropdown(
                 label="Queue item",
                 choices=initial_items,
-                value=(initial_items[0] if initial_items else None),
+                value=_preferred_item_choice(initial_manifest),
                 scale=3,
             )
             up_button = gr.Button("↑ Up")
@@ -268,7 +332,7 @@ def build_project_queue_demo(
 
         refresh.click(
             refresh_all,
-            outputs=[project, voice, variant, queue_table, queue_item, add_status],
+            outputs=[project, voice, variant, language, queue_table, queue_item, add_status],
         )
         project.change(
             project_settings,
