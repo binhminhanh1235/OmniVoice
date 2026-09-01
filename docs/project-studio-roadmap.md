@@ -1,6 +1,6 @@
 # OmniVoice Project Studio roadmap
 
-This roadmap prioritizes reliable long-form narration on Google Colab first, then speed and production convenience.
+This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SSD first, then persistence, speed and production convenience.
 
 ## P0 — usable project workflow
 
@@ -21,7 +21,7 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 - [x] Live per-section generation status
 - [x] Colab Project Studio launcher
 - [x] Persistent multi-project queue with continuous section-by-section rendering
-- [x] Queue crash recovery: completed projects/sections are skipped after Colab restart
+- [x] Queue crash recovery: completed projects/sections are skipped after runtime restart when the workspace still exists
 - [x] Cooperative pause after current section and continue-on-project-error policy
 - [x] Optional auto-merge per queued project
 - [x] Project-level render status derived from `section-status.json`
@@ -47,17 +47,25 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 ## P2 — efficiency and lower-friction setup
 
 1. [x] Auto Best Reference Segment: rank clean 3–10 second windows from long recordings, listen before selection, optional ASR transcript suggestion.
-2. [x] Colab hardware detection and quality presets (`SAFE`, `BALANCED`, `FAST`) without exposing a wall of generation parameters.
+2. [x] Hardware detection and quality presets (`SAFE`, `BALANCED`, `FAST`) without exposing a wall of generation parameters.
    - hardware summary: CUDA, GPU, VRAM, compute capability, recommended ASR device;
    - T4 / 16 GB recommendation: `BALANCED` + ASR on CPU;
    - `SAFE`: 32 steps, 3 retries, adaptive retry + pacing guard + ASR verification;
    - `BALANCED`: 28 steps, 2 retries, adaptive retry + pacing guard + ASR verification;
    - `FAST`: 24 steps, 1 retry, no adaptive repair/pacing timestamps, but ASR text verification remains enabled;
    - workspace default in `hardware-quality.json`, optional per-project override in `studio.json`.
-3. [ ] Cache reusable verification/preprocessing metadata and avoid repeated ASR/setup work.
-4. [ ] Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
-5. [ ] Same-language reference selection when one voice has multiple language variants.
-6. [ ] Benchmark acceleration options such as FlashInfer/CUDA graphs before enabling them by default.
+3. [x] Kaggle local execution workspace.
+   - automatic Kaggle detection;
+   - writable execution root: `/kaggle/working/OmniVoiceStudio`;
+   - `/kaggle/input` treated as read-only source material only;
+   - no Google Drive/rclone/remote persistence in this phase;
+   - dedicated Kaggle notebook;
+   - execution and future persistence kept as separate architectural layers.
+4. [ ] Remote persistence adapter for exporting/synchronizing the Kaggle execution workspace after the local-first path is stable.
+5. [ ] Cache reusable verification/preprocessing metadata and avoid repeated ASR/setup work.
+6. [ ] Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
+7. [ ] Same-language reference selection when one voice has multiple language variants.
+8. [ ] Benchmark acceleration options such as FlashInfer/CUDA graphs before enabling them by default.
 
 ## P3 — authoring and production tools
 
@@ -69,23 +77,23 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 
 ## Next priority
 
-The next implementation target is **reusable preprocessing / verification caching**.
+Validate the **Kaggle local execution path** in a real Kaggle GPU notebook before adding remote persistence.
 
-The goal is to avoid repeating work that does not change between retries, resumes, and queued projects:
+The runtime contract is deliberately simple:
 
 ```text
-normalized text / hashes
-voice prompt resolution
-ASR / verification metadata where safely reusable
-project + chunk fingerprints
-        ↓
-cache
-        ↓
-less setup / repeated analysis
-without skipping required verification of newly generated audio
+/kaggle/input
+    read-only sources
+          ↓
+/kaggle/working/OmniVoiceStudio
+    local execution workspace
+          ↓
+Project / Queue / section-status.json / WAV outputs
 ```
 
-The cache must never mark newly generated audio as verified merely because an older candidate with the same text once passed. Generated-audio verification remains tied to the audio fingerprint.
+Google Drive or another persistent backend will later attach at an explicit sync/export boundary. It must not become the filesystem used by the generation hot path.
+
+After Kaggle local execution is stable, the next optimization target is reusable preprocessing / verification caching. The cache must never mark newly generated audio as verified merely because an older candidate with the same text once passed; generated-audio verification remains tied to the audio fingerprint.
 
 ## Architectural rule
 
