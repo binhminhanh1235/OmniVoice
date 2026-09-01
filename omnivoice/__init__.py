@@ -70,6 +70,11 @@ from omnivoice.style_bank import (
     StyleBankProjectRunner,
     generate_project_with_style_bank,
 )
+from omnivoice.voice_doctor import (
+    VoiceDoctorConfig,
+    VoiceDoctorReport,
+    analyze_voice_reference,
+)
 from omnivoice.voice_library import (
     STYLE_VARIANT_FALLBACKS,
     VoiceEntry,
@@ -114,6 +119,9 @@ __all__ = [
     "VoiceVariant",
     "VoicePromptResolution",
     "STYLE_VARIANT_FALLBACKS",
+    "VoiceDoctorConfig",
+    "VoiceDoctorReport",
+    "analyze_voice_reference",
     "StyleBankProjectRunner",
     "generate_project_with_style_bank",
     "PreviewTarget",

@@ -65,7 +65,7 @@ omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
 omnivoice-demo = "omnivoice.cli.demo_robust:main"
 omnivoice-demo-legacy = "omnivoice.cli.demo:main"
-omnivoice-project-studio = "omnivoice.cli.project_studio_text_resume:main"
+omnivoice-project-studio = "omnivoice.cli.project_studio_voice_doctor:main"
 omnivoice-merge-lora = "omnivoice.cli.merge_lora:main"
 
 [project.urls]
@@ -86,10 +86,8 @@ torchaudio = [
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
-# Use PyTorch built for NVIDIA Toolkit version 12.8.
-# Available versions: https://pytorch.org/get-started/locally/
+# Install PyTorch built for NVIDIA Toolkit version 12.8.
 url = "https://download.pytorch.org/whl/cu128"
-# Only use this index when explicitly requested as `dependencies` above.
 explicit = true
 
 [tool.uv]
