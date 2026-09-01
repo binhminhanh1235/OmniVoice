@@ -5,13 +5,13 @@
 
 """Persistent section-level checkpoints for resumable Project Studio renders.
 
-``project.json`` remains the complete project manifest.  This module adds a
+``project.json`` remains the complete project manifest. This module adds a
 small, independent ``section-status.json`` checkpoint whose only job is to
 answer one question reliably after a Colab/runtime restart: which sections are
 already complete and which sections still need work?
 
 A section recorded as ``verified`` is considered complete only when its section
-WAV still exists.  Interrupted ``generating``/``queued`` states are recovered
+WAV still exists. Interrupted ``generating``/``queued`` states are recovered
 as ``pending`` when the project is loaded, so a killed runtime cannot leave a
 section permanently stuck in an in-progress state.
 """
@@ -105,6 +105,35 @@ def ensure_section_status(project: OmniVoiceProject) -> Path:
     return path
 
 
+def _section_state_signature(section: ProjectSection) -> tuple[Any, ...]:
+    """Cheap equality snapshot used to avoid unnecessary Google Drive writes."""
+
+    return (
+        section.status,
+        section.audio_file,
+        section.updated_at,
+        tuple(
+            (
+                beat.id,
+                beat.status,
+                beat.audio_file,
+                beat.updated_at,
+                tuple(
+                    (
+                        chunk.id,
+                        chunk.status,
+                        chunk.audio_file,
+                        chunk.report_file,
+                        chunk.updated_at,
+                    )
+                    for chunk in beat.chunks
+                ),
+            )
+            for beat in section.beats
+        ),
+    )
+
+
 def _restore_verified_children(project: OmniVoiceProject, section: ProjectSection) -> None:
     """Recover child checkpoint metadata when their persisted audio still exists."""
 
@@ -144,11 +173,11 @@ def restore_section_status(
 ) -> SectionStatusRestore:
     """Overlay section checkpoints onto a loaded project manifest.
 
-    ``verified`` is restored only when the final section WAV exists.  Stale
+    ``verified`` is restored only when the final section WAV exists. Stale
     ``generating`` and ``queued`` states become ``pending`` in memory because
-    they represent interrupted work.  When ``sync_manifest`` is true, the
-    reconciled state is also written back to ``project.json`` so existing UI
-    code immediately sees the recovered checkpoint state.
+    they represent interrupted work. When ``sync_manifest`` is true, the
+    reconciled state is written back to ``project.json`` only if reconciliation
+    actually changed the manifest.
     """
 
     path = section_status_path(project)
@@ -175,12 +204,14 @@ def restore_section_status(
     restored: list[str] = []
     interrupted: list[str] = []
     invalid_complete: list[str] = []
+    changed = False
 
     for section in project.manifest.sections:
         record = records.get(section.id)
         if not isinstance(record, dict):
             continue
 
+        before = _section_state_signature(section)
         raw_status = str(record.get("status") or "pending").lower()
         saved_audio = record.get("audio_file")
         if saved_audio:
@@ -206,7 +237,10 @@ def restore_section_status(
         if record.get("updated_at"):
             section.updated_at = str(record["updated_at"])
 
-    if sync_manifest and (restored or interrupted or invalid_complete):
+        if _section_state_signature(section) != before:
+            changed = True
+
+    if sync_manifest and changed:
         project.save()
 
     return SectionStatusRestore(
