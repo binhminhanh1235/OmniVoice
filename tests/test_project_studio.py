@@ -6,6 +6,7 @@ from omnivoice import VoiceClonePrompt
 from omnivoice.cli.project_studio import (
     ProjectStudioController,
     _split_section_ids,
+    build_demo,
     build_parser,
 )
 
@@ -90,3 +91,8 @@ def test_project_studio_parser_defaults():
     assert args.model == "k2-fsa/OmniVoice"
     assert args.asr_device == "cpu"
     assert args.port == 7860
+
+
+def test_project_studio_gradio_build_smoke(tmp_path: Path):
+    demo = build_demo(FakeModel(), tmp_path / "studio")
+    assert demo is not None
