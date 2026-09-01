@@ -3,7 +3,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Project Studio launcher with persistent section-level resume checkpoints."""
+"""Project Studio launcher with persistent section resume and version history."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ from omnivoice.cli import project_studio_live as live_module
 from omnivoice.cli import project_studio_plus as plus_module
 from omnivoice.cli.project_studio import ProjectStudioController
 from omnivoice.project import OmniVoiceProject
+from omnivoice.section_history import (
+    SectionVersion,
+    create_section_snapshot,
+    list_section_versions,
+    restore_section_version,
+    section_version_audio,
+)
 from omnivoice.section_status import (
     ensure_section_status,
     incomplete_section_ids,
@@ -25,7 +32,7 @@ from omnivoice.section_status import (
 
 
 class SectionResumeProjectStudioController(ProjectStudioController):
-    """Project Studio controller backed by ``section-status.json`` checkpoints."""
+    """Project Studio controller backed by section checkpoints and history."""
 
     def create_project(
         self,
@@ -61,6 +68,16 @@ class SectionResumeProjectStudioController(ProjectStudioController):
             else [section.id for section in project.manifest.sections]
         )
         targets = incomplete_section_ids(project, requested) if resume else requested
+
+        # Forced re-rendering of an existing section must be reversible. The
+        # snapshot is taken before any status is changed or inference begins.
+        if not resume:
+            for section_id in targets:
+                create_section_snapshot(
+                    project,
+                    section_id,
+                    reason="before forced section regeneration",
+                )
 
         # Nothing to synthesize. Returning immediately is important after a
         # Colab restart because completed sections must never be rendered again.
@@ -124,6 +141,13 @@ class SectionResumeProjectStudioController(ProjectStudioController):
 
         project = self.load_project(project_path)
 
+        # Archive the coherent section state before invalidating one chunk.
+        create_section_snapshot(
+            project,
+            section_id,
+            reason=f"before regenerating {chunk_id}",
+        )
+
         # Sidecar-first ordering records the user's regeneration intent even if
         # the runtime dies before mark_chunk_for_regeneration saves project.json.
         set_section_status(
@@ -146,9 +170,43 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         write_section_status(generated)
         return generated
 
+    def section_versions(
+        self,
+        project_path: str | Path,
+        section_id: str,
+    ) -> list[SectionVersion]:
+        project = self.load_project(project_path)
+        return list_section_versions(project, section_id)
+
+    def section_version_audio(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        version_id: str,
+    ) -> Path:
+        project = self.load_project(project_path)
+        return section_version_audio(project, section_id, version_id)
+
+    def restore_section_version(
+        self,
+        project_path: str | Path,
+        section_id: str,
+        version_id: str,
+        *,
+        snapshot_current: bool = True,
+    ) -> OmniVoiceProject:
+        project = self.load_project(project_path)
+        restore_section_version(
+            project,
+            section_id,
+            version_id,
+            snapshot_current=snapshot_current,
+        )
+        return self.load_project(project.root)
+
 
 def _install_resume_controller() -> None:
-    """Inject the resume-aware controller into the existing Studio builders."""
+    """Inject the resume/history-aware controller into existing Studio builders."""
 
     studio_module.ProjectStudioController = SectionResumeProjectStudioController
     live_module.ProjectStudioController = SectionResumeProjectStudioController
