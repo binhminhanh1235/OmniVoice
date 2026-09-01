@@ -83,3 +83,20 @@ def test_ensure_runtime_workspace_creates_only_local_execution_tree(tmp_path):
     assert info.root.is_dir()
     assert (info.root / "projects").is_dir()
     assert (info.root / "voices").is_dir()
+
+
+def test_project_studio_cli_uses_detected_execution_workspace(monkeypatch):
+    from omnivoice.cli import project_studio_voice_doctor as launcher
+
+    detected = RuntimeWorkspace(
+        environment="kaggle",
+        root=Path("/kaggle/working/OmniVoiceStudio"),
+        ephemeral=True,
+        input_root=Path("/kaggle/input"),
+        persistence_backend="none",
+    )
+    monkeypatch.setattr(launcher, "detect_runtime_workspace", lambda: detected)
+
+    args = launcher.build_parser().parse_args([])
+    assert args.workspace == "/kaggle/working/OmniVoiceStudio"
+    assert args.asr_device == "cpu"
