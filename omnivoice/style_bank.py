@@ -218,12 +218,13 @@ class StyleBankProjectRunner:
                 project.save()
 
             project._assemble_section(section, sample_rate, self.style_resolver)
-            project.save()
 
-            # Flush immediately after each completed section rather than after
-            # the whole batch. This is the critical durability boundary for
-            # Colab/runtime interruptions.
+            # The final WAV already exists at this point. Persist the compact
+            # section checkpoint first, then the larger manifest. If Colab dies
+            # between these two writes, the next load restores project.json from
+            # the newer section-status.json rather than re-rendering this section.
             write_section_status(project)
+            project.save()
 
         return project.manifest
 
