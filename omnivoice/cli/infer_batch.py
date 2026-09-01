@@ -84,7 +84,7 @@ def get_parser():
         '"ref_text" (str): transcript of the reference audio; '
         '"instruct" (str): instruction for voice design (used when ref_audio is absent); '
         '"language_id" (str): language code, e.g. "en"; '
-        '"duration" (float): target duration in seconds; '
+        '"duration" (float): pre-synthesis audio-token budget in seconds; '
         '"speed" (float): speaking speed multiplier. '
         "Only id and text are required; all other fields are optional.",
     )

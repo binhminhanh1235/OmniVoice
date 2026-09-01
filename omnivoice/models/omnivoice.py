@@ -969,7 +969,7 @@ class OmniVoice(PreTrainedModel):
 
         if ref_rms is not None and ref_rms < 0.1:
             generated_audio = generated_audio * ref_rms / 0.1
-        elif ref_rms is None:
+        elif ref_rms is None and generated_audio.size:
             peak = np.abs(generated_audio).max()
             if peak > 1e-6:
                 generated_audio = generated_audio / peak * 0.5

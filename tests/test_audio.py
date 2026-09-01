@@ -644,6 +644,28 @@ def test_generation_config_defaults_cap_internal_gap_at_500_ms():
     assert _longest_silent_run_ms(result, SAMPLE_RATE) <= 500 + SEEK_STEP_MS
 
 
+@pytest.mark.parametrize("samples", [0, SAMPLE_RATE])
+def test_generation_config_preserves_empty_audio_without_peak_reduction(samples):
+    from omnivoice.models.omnivoice import (
+        OmniVoice,
+        OmniVoiceGenerationConfig,
+    )
+
+    config = OmniVoiceGenerationConfig(pad_duration=0, fade_duration=0)
+    model_stub = SimpleNamespace(sampling_rate=SAMPLE_RATE)
+    audio = np.zeros((1, samples), dtype=np.float32)
+
+    result = OmniVoice._post_process_audio(
+        model_stub,
+        audio,
+        ref_rms=None,
+        gen_config=config,
+    )
+
+    assert result.shape == (1, 0)
+    assert result.dtype == np.float32
+
+
 def test_generation_config_accepts_controls_from_keyword_dictionary():
     from omnivoice.models.omnivoice import OmniVoiceGenerationConfig
 

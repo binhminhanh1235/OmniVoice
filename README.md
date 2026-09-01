@@ -332,7 +332,7 @@ The test list is a JSONL file where each line is a JSON object:
 ```
 Only `id` and `text` are mandatory fields. `ref_audio` and `ref_text` are used in voice cloning mode. `instruct` is used in voice design mode. If no reference audio or instruct are provided, the model will generate text in a random voice.
 
-`language_id`, `duration`, and `speed` are optional. `duration` (in seconds) fixes the output length; `speed` controls the speaking rate. If `duration` and `speed` are both provided, `speed` will be ignored.
+`language_id`, `duration`, and `speed` are optional. `duration` (in seconds) sets the pre-synthesis audio-token budget; post-processing can change the final WAV duration. `speed` controls the speaking rate and is ignored when `duration` is set.
 
 ### FlashInfer Acceleration
 
