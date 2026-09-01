@@ -21,7 +21,63 @@ Each project still owns its normal:
 
 The queue answers **which project comes next**. `section-status.json` answers **which section inside that project still needs work**.
 
-This separation is intentional.
+Project-level render status is deliberately **derived** from `section-status.json`; there is no third project-status sidecar that could drift out of sync.
+
+## Project render status
+
+The Project Browser derives these statuses:
+
+```text
+DONE          every section is verified/complete
+GENERATING    one or more sections are queued or generating
+NEEDS_REVIEW  no section is generating, but at least one is unverified
+FAILED        no section is generating, but at least one section is failed
+PENDING       remaining work that has not reached one of the states above
+```
+
+These are **project render statuses**. They are separate from queue statuses such as `RUNNING`, `PAUSED`, and `COMPLETED`.
+
+The Queue UI defaults to:
+
+```text
+☑ PENDING
+☑ GENERATING
+☐ NEEDS_REVIEW
+☐ FAILED
+☐ DONE
+```
+
+This keeps a workspace with hundreds of old projects focused on the small set that still needs work. `DONE` projects remain available by explicitly enabling that filter.
+
+Projects already present in `project-queue.json` are hidden from the Project Browser so they cannot be accidentally selected twice.
+
+The browser table shows:
+
+- project render status;
+- title;
+- completed / total sections;
+- active section when one is generating;
+- last status update;
+- project path.
+
+The dropdown label also includes status and progress, for example:
+
+```text
+[PENDING 3/11] Video A
+[GENERATING 7/11] Video B
+```
+
+## Batch add by status
+
+For large workspaces, the Queue UI has:
+
+```text
+Add ALL filtered projects using saved settings
+```
+
+This adds every currently eligible project shown by the status filter. Each project uses its own saved `studio.json` voice / variant / language settings instead of applying one global voice to the entire batch.
+
+Projects without valid saved voice settings are skipped and reported rather than poisoning the whole batch operation.
 
 ## Runtime behavior
 
@@ -85,7 +141,7 @@ Each queued project stores:
 
 Changing another project's settings later does not silently mutate an already queued item's saved generation settings.
 
-## Statuses
+## Queue statuses
 
 ```text
 PENDING       waiting to run
@@ -127,8 +183,8 @@ A merge failure does not erase successful section generation. The project remain
 
 1. Create/save projects normally in **Project Studio**.
 2. Open **4. Project Queue**.
-3. Choose project, voice/variant/language and queue preferences.
-4. Add projects in the desired order.
+3. Keep the default **PENDING + GENERATING** filter, or enable another status when needed.
+4. Add one selected project, or use **Add ALL filtered projects using saved settings**.
 5. Reorder with **Up / Down** if needed.
 6. Click **Run Queue**.
 7. Leave Colab running.
