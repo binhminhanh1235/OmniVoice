@@ -31,6 +31,13 @@ from omnivoice.project import (
     _write_json,
 )
 from omnivoice.robust_longform import RobustLongFormConfig
+from omnivoice.section_status import (
+    ensure_section_status,
+    restore_section_status,
+    section_is_complete,
+    set_section_status,
+    write_section_status,
+)
 from omnivoice.voice_library import VoiceLibrary, VoicePromptResolution
 
 
@@ -89,6 +96,12 @@ class StyleBankProjectRunner:
         resume: bool = True,
         **generate_kwargs: Any,
     ):
+        # Reconcile the lightweight section checkpoint before looking at any
+        # generation unit. This makes direct StyleBankProjectRunner usage just
+        # as restart-safe as the Gradio Project Studio controller.
+        ensure_section_status(project)
+        restore_section_status(project, sync_manifest=True)
+
         sample_rate = int(self.model.sampling_rate)
         base_robust = robust_config or RobustLongFormConfig(
             max_chunk_words=project.manifest.max_chunk_words,
@@ -109,6 +122,17 @@ class StyleBankProjectRunner:
         for section in project.manifest.sections:
             if selected is not None and section.id not in selected:
                 continue
+
+            # Section-level resume is deliberately checked before beat/chunk
+            # work. A verified section with an existing final WAV is immutable
+            # unless the caller explicitly disables resume.
+            if resume and section_is_complete(project, section):
+                continue
+
+            # Persist the in-flight state before expensive inference. If the
+            # runtime is killed, restore_section_status maps this back to
+            # pending on the next load.
+            set_section_status(project, section.id, "generating")
 
             for beat in section.beats:
                 profile = self.style_resolver.resolve(beat.style)
@@ -195,6 +219,11 @@ class StyleBankProjectRunner:
 
             project._assemble_section(section, sample_rate, self.style_resolver)
             project.save()
+
+            # Flush immediately after each completed section rather than after
+            # the whole batch. This is the critical durability boundary for
+            # Colab/runtime interruptions.
+            write_section_status(project)
 
         return project.manifest
 
