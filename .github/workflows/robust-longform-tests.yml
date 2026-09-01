@@ -21,6 +21,7 @@ on:
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
       - "notebooks/OmniVoice_Robust_LongForm_Colab.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - ".github/workflows/robust-longform-tests.yml"
   push:
     branches:
@@ -52,7 +53,9 @@ jobs:
         run: python -m compileall -q omnivoice
 
       - name: Validate Colab notebook JSON
-        run: python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
+        run: |
+          python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
 
       - name: Run robust long-form and project tests
         run: |
