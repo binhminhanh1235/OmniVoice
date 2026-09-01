@@ -125,9 +125,7 @@ def test_parse_script_into_sections_beats_and_chunks():
 
 def test_directives_headings_and_markdown_linebreaks_are_not_spoken():
     manifest = parse_project_script(SCRIPT)
-    all_spoken = "\n".join(
-        section.spoken_text for section in manifest.sections
-    )
+    all_spoken = "\n".join(section.spoken_text for section in manifest.sections)
 
     assert "[WARM]" not in all_spoken
     assert "[SOFT]" not in all_spoken

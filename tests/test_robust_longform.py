@@ -61,9 +61,12 @@ def test_semantic_chunker_splits_overlong_sentence_without_losing_words():
         "thirteen fourteen fifteen sixteen, seventeen eighteen nineteen twenty."
     )
     chunks = semantic_chunk_text(text, max_words=8, max_chars=80)
-    rebuilt_words = " ".join(chunk.text for chunk in chunks).replace(",", "").replace(
-        ".", ""
-    ).split()
+    rebuilt_words = (
+        " ".join(chunk.text for chunk in chunks)
+        .replace(",", "")
+        .replace(".", "")
+        .split()
+    )
     original_words = text.replace(",", "").replace(".", "").split()
     assert rebuilt_words == original_words
     assert len(chunks) > 1

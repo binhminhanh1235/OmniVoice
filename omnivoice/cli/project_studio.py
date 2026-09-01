@@ -400,7 +400,9 @@ def build_demo(model: Any, workspace: str | Path):
     def refresh_projects():
         projects = controller.list_projects()
         value = projects[0] if projects else None
-        return gr.update(choices=projects, value=value), f"Found {len(projects)} projects."
+        return gr.update(
+            choices=projects, value=value
+        ), f"Found {len(projects)} projects."
 
     def create_project(script, overwrite):
         try:
@@ -427,7 +429,13 @@ def build_demo(model: Any, workspace: str | Path):
 
     def load_project(path):
         if not path:
-            return "", [], gr.update(choices=[]), gr.update(choices=[]), "Select a project."
+            return (
+                "",
+                [],
+                gr.update(choices=[]),
+                gr.update(choices=[]),
+                "Select a project.",
+            )
         try:
             project = controller.load_project(path)
             rows, chunks, sections = controller.project_view(project.root)
@@ -446,8 +454,12 @@ def build_demo(model: Any, workspace: str | Path):
                 f"Loaded {project.manifest.title}.{suffix}",
             )
         except Exception as exc:
-            return "", [], gr.update(choices=[]), gr.update(choices=[]), (
-                f"Load error: {type(exc).__name__}: {exc}"
+            return (
+                "",
+                [],
+                gr.update(choices=[]),
+                gr.update(choices=[]),
+                (f"Load error: {type(exc).__name__}: {exc}"),
             )
 
     def generate_project(path, voice, variant, language, sections, resume, strict):
@@ -476,7 +488,12 @@ def build_demo(model: Any, workspace: str | Path):
             )
         except Exception as exc:
             logger.exception("Project generation failed")
-            return [], gr.update(), gr.update(), f"Generate error: {type(exc).__name__}: {exc}"
+            return (
+                [],
+                gr.update(),
+                gr.update(),
+                f"Generate error: {type(exc).__name__}: {exc}",
+            )
 
     def regenerate(path, chunk, voice, variant, language, strict):
         try:
@@ -500,7 +517,12 @@ def build_demo(model: Any, workspace: str | Path):
             )
         except Exception as exc:
             logger.exception("Chunk regeneration failed")
-            return [], gr.update(), gr.update(), f"Regenerate error: {type(exc).__name__}: {exc}"
+            return (
+                [],
+                gr.update(),
+                gr.update(),
+                f"Regenerate error: {type(exc).__name__}: {exc}",
+            )
 
     def play_section(path, section_id):
         if not path or not section_id:
@@ -523,9 +545,7 @@ def build_demo(model: Any, workspace: str | Path):
     initial_voice_names = controller.voices.voice_names()
     initial_voice = initial_voice_names[0] if initial_voice_names else None
     initial_variants = (
-        controller.voices.variant_choices(initial_voice)
-        if initial_voice
-        else []
+        controller.voices.variant_choices(initial_voice) if initial_voice else []
     )
 
     with gr.Blocks(title="OmniVoice Project Studio") as demo:
@@ -545,7 +565,9 @@ def build_demo(model: Any, workspace: str | Path):
                 "`DEFAULT`, `WARM`, `SOFT`, or `EMPHASIZE`."
             )
             with gr.Row():
-                voice_name = gr.Textbox(label="Voice name", placeholder="Warm American Male")
+                voice_name = gr.Textbox(
+                    label="Voice name", placeholder="Warm American Male"
+                )
                 voice_variant_new = gr.Textbox(label="Variant", value="DEFAULT")
                 voice_language_new = gr.Textbox(label="Language", value="en")
             reference_audio = gr.Audio(label="Reference audio (3–10s)", type="filepath")
@@ -598,7 +620,9 @@ def build_demo(model: Any, workspace: str | Path):
             )
             with gr.Row():
                 resume = gr.Checkbox(label="Resume / skip verified chunks", value=True)
-                strict = gr.Checkbox(label="Exact mode: reject unverified chunks", value=False)
+                strict = gr.Checkbox(
+                    label="Exact mode: reject unverified chunks", value=False
+                )
                 generate_button = gr.Button("Generate / Resume", variant="primary")
             status_table = gr.Dataframe(headers=status_headers, interactive=False)
 
@@ -607,7 +631,9 @@ def build_demo(model: Any, workspace: str | Path):
                 regenerate_button = gr.Button("Regenerate selected chunk")
 
             with gr.Row():
-                section_audio_picker = gr.Dropdown(label="Generated section", choices=[])
+                section_audio_picker = gr.Dropdown(
+                    label="Generated section", choices=[]
+                )
                 play_section_button = gr.Button("Play section")
             section_audio = gr.Audio(label="Section audio", type="filepath")
 
@@ -636,7 +662,9 @@ def build_demo(model: Any, workspace: str | Path):
             ],
             outputs=[saved_voice, saved_variant, voice_message],
         )
-        parse_button.click(parse_script, inputs=script, outputs=[parse_table, parse_message])
+        parse_button.click(
+            parse_script, inputs=script, outputs=[parse_table, parse_message]
+        )
         refresh_project_button.click(
             refresh_projects,
             outputs=[project_picker, parse_message],

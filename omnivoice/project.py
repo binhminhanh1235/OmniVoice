@@ -100,9 +100,7 @@ def _normalise_directive_token(token: str) -> str:
 
 def _split_directives(raw: str) -> list[str]:
     return [
-        _normalise_directive_token(token)
-        for token in raw.split(",")
-        if token.strip()
+        _normalise_directive_token(token) for token in raw.split(",") if token.strip()
     ]
 
 
@@ -190,12 +188,8 @@ class StyleProfile:
 
 DEFAULT_STYLE_PROFILES: dict[str, StyleProfile] = {
     "DEFAULT": StyleProfile("DEFAULT"),
-    "WARM": StyleProfile(
-        "WARM", speed=0.97, pause_multiplier=1.08, beat_pause_ms=280
-    ),
-    "SOFT": StyleProfile(
-        "SOFT", speed=0.92, pause_multiplier=1.18, beat_pause_ms=340
-    ),
+    "WARM": StyleProfile("WARM", speed=0.97, pause_multiplier=1.08, beat_pause_ms=280),
+    "SOFT": StyleProfile("SOFT", speed=0.92, pause_multiplier=1.18, beat_pause_ms=340),
     "EMPHASIZE": StyleProfile(
         "EMPHASIZE", speed=0.95, pause_multiplier=1.12, beat_pause_ms=300
     ),
@@ -430,8 +424,7 @@ def _manifest_from_dict(data: dict[str, Any]) -> ProjectManifest:
         beats = []
         for beat_data in section_data.get("beats", []):
             chunks = [
-                ProjectChunk(**chunk_data)
-                for chunk_data in beat_data.get("chunks", [])
+                ProjectChunk(**chunk_data) for chunk_data in beat_data.get("chunks", [])
             ]
             beat_fields = dict(beat_data)
             beat_fields["chunks"] = chunks
@@ -635,8 +628,7 @@ class OmniVoiceProject:
         for chunk in beat.chunks:
             if not chunk.audio_file:
                 raise RuntimeError(
-                    f"Cannot assemble {section.id}/{beat.id}; "
-                    f"{chunk.id} has no audio"
+                    f"Cannot assemble {section.id}/{beat.id}; {chunk.id} has no audio"
                 )
             audio, sr = _read_audio(self.root / chunk.audio_file)
             if sr != sample_rate:
@@ -740,20 +732,13 @@ class OmniVoiceProject:
                     ),
                     paragraph_pause_ms=max(
                         0,
-                        int(
-                            base_robust.paragraph_pause_ms
-                            * profile.pause_multiplier
-                        ),
+                        int(base_robust.paragraph_pause_ms * profile.pause_multiplier),
                     ),
                 )
 
                 for chunk in beat.chunks:
                     audio_path, report_path = self._chunk_paths(section, chunk)
-                    if (
-                        resume
-                        and chunk.status == "verified"
-                        and audio_path.exists()
-                    ):
+                    if resume and chunk.status == "verified" and audio_path.exists():
                         chunk.audio_file = str(audio_path.relative_to(self.root))
                         chunk.report_file = str(report_path.relative_to(self.root))
                         continue
@@ -797,9 +782,7 @@ class OmniVoiceProject:
 
                     chunk.audio_file = str(audio_path.relative_to(self.root))
                     chunk.report_file = str(report_path.relative_to(self.root))
-                    chunk.status = (
-                        "verified" if result.all_verified else "unverified"
-                    )
+                    chunk.status = "verified" if result.all_verified else "unverified"
                     chunk.updated_at = _utc_now()
                     self.save()
 

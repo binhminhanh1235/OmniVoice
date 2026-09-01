@@ -45,7 +45,7 @@ from omnivoice.utils.text import ABBREVIATIONS
 logger = logging.getLogger(__name__)
 
 _DOT_SENTINEL = "\ue000"
-_CLOSING_MARKS = '\"\'”’)]}》」】'
+_CLOSING_MARKS = "\"'”’)]}》」】"
 _CRITICAL_WORDS = {"not", "no", "never", "without"}
 
 _CONTRACTIONS = {
@@ -405,9 +405,7 @@ def score_transcript(
     ref_counts = Counter(ref_words)
     hyp_counts = Counter(hyp_words)
     critical_missing = sorted(
-        word
-        for word in _CRITICAL_WORDS
-        if ref_counts[word] > hyp_counts[word]
+        word for word in _CRITICAL_WORDS if ref_counts[word] > hyp_counts[word]
     )
     repetitions = _extra_repeated_ngrams(
         ref_words,

@@ -219,8 +219,7 @@ def create_generate_fn(
                 )
             except Exception as exc:
                 return None, (
-                    "Reference processing failed: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"Reference processing failed: {type(exc).__name__}: {exc}"
                 )
             generate_kwargs["voice_clone_prompt"] = voice_prompt
 

@@ -109,20 +109,13 @@ class StyleBankProjectRunner:
                     ),
                     paragraph_pause_ms=max(
                         0,
-                        int(
-                            base_robust.paragraph_pause_ms
-                            * profile.pause_multiplier
-                        ),
+                        int(base_robust.paragraph_pause_ms * profile.pause_multiplier),
                     ),
                 )
 
                 for chunk in beat.chunks:
                     audio_path, report_path = project._chunk_paths(section, chunk)
-                    if (
-                        resume
-                        and chunk.status == "verified"
-                        and audio_path.exists()
-                    ):
+                    if resume and chunk.status == "verified" and audio_path.exists():
                         chunk.audio_file = str(audio_path.relative_to(project.root))
                         chunk.report_file = str(report_path.relative_to(project.root))
                         continue
@@ -169,9 +162,7 @@ class StyleBankProjectRunner:
 
                     chunk.audio_file = str(audio_path.relative_to(project.root))
                     chunk.report_file = str(report_path.relative_to(project.root))
-                    chunk.status = (
-                        "verified" if result.all_verified else "unverified"
-                    )
+                    chunk.status = "verified" if result.all_verified else "unverified"
                     chunk.updated_at = _utc_now()
                     project.save()
 

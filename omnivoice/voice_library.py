@@ -326,7 +326,9 @@ class VoiceLibrary:
     def variants(self, name_or_slug: str) -> list[str]:
         return sorted(self.get(name_or_slug).variants)
 
-    def variant_choices(self, name_or_slug: str, *, include_auto: bool = True) -> list[str]:
+    def variant_choices(
+        self, name_or_slug: str, *, include_auto: bool = True
+    ) -> list[str]:
         variants = self.variants(name_or_slug)
         return (["AUTO"] + variants) if include_auto else variants
 
