@@ -25,6 +25,13 @@ from omnivoice.models.omnivoice import (
     OmniVoiceGenerationConfig,
     VoiceClonePrompt,
 )
+from omnivoice.adaptive_quality import (
+    AdaptiveChunkReport,
+    AdaptiveQualityConfig,
+    AdaptiveRobustLongFormGenerator,
+    PacingMetrics,
+    analyze_pacing,
+)
 from omnivoice.preview import (
     PreviewResult,
     PreviewTarget,
@@ -70,6 +77,11 @@ __all__ = [
     "RobustLongFormGenerator",
     "RobustLongFormResult",
     "generate_robust_longform",
+    "AdaptiveQualityConfig",
+    "AdaptiveRobustLongFormGenerator",
+    "AdaptiveChunkReport",
+    "PacingMetrics",
+    "analyze_pacing",
     "OmniVoiceProject",
     "ProjectManifest",
     "ProjectSection",
