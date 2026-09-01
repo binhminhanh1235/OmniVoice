@@ -3,7 +3,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Text Doctor + Voice Doctor + persistent Project Studio launcher."""
+"""Text Doctor + Voice Doctor + Project Studio + persistent Project Queue."""
 
 from __future__ import annotations
 
@@ -14,8 +14,12 @@ from pathlib import Path
 import torch
 
 from omnivoice import OmniVoice
+from omnivoice.cli.project_queue_ui import build_project_queue_demo
 from omnivoice.cli.project_studio import default_workspace
-from omnivoice.cli.project_studio_resume import build_demo as build_resume_project_studio
+from omnivoice.cli.project_studio_resume import (
+    SectionResumeProjectStudioController,
+    build_demo as build_resume_project_studio,
+)
 from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
 from omnivoice.utils.common import get_best_device
@@ -31,9 +35,19 @@ def build_demo(model, workspace: str | Path):
     # save the analyzed reference directly into the shared Voice Library.
     voice_doctor = build_voice_doctor_demo(model, workspace)
     studio = build_resume_project_studio(model, workspace)
+    project_queue = build_project_queue_demo(
+        model,
+        workspace,
+        controller_cls=SectionResumeProjectStudioController,
+    )
     return gr.TabbedInterface(
-        [text_doctor, voice_doctor, studio],
-        ["1. Text Doctor", "2. Voice Doctor", "3. Project Studio"],
+        [text_doctor, voice_doctor, studio, project_queue],
+        [
+            "1. Text Doctor",
+            "2. Voice Doctor",
+            "3. Project Studio",
+            "4. Project Queue",
+        ],
         title="OmniVoice Project Studio",
     )
 
@@ -42,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Launch OmniVoice Project Studio with Text Doctor, Voice Doctor, "
-            "and persistent section resume"
+            "persistent section resume, and a crash-safe multi-project queue"
         )
     )
     parser.add_argument("--model", default="k2-fsa/OmniVoice")

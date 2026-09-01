@@ -50,6 +50,15 @@ from omnivoice.project import (
     StyleProfile,
     parse_project_script,
 )
+from omnivoice.project_queue import (
+    QUEUE_FILE_NAME,
+    ProjectQueueItem,
+    ProjectQueueManifest,
+    ProjectQueueRunner,
+    ProjectQueueStore,
+    QueueEvent,
+    queue_rows,
+)
 from omnivoice.reference_segment import (
     ReferenceSegmentCandidate,
     ReferenceSegmentConfig,
@@ -130,6 +139,13 @@ __all__ = [
     "OmniVoiceStyleResolver",
     "DEFAULT_STYLE_PROFILES",
     "parse_project_script",
+    "QUEUE_FILE_NAME",
+    "ProjectQueueItem",
+    "ProjectQueueManifest",
+    "ProjectQueueStore",
+    "ProjectQueueRunner",
+    "QueueEvent",
+    "queue_rows",
     "ReferenceSegmentConfig",
     "ReferenceSegmentCandidate",
     "ReferenceSegmentResult",

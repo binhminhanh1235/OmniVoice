@@ -20,6 +20,10 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 - [x] Section/chunk status table
 - [x] Live per-section generation status
 - [x] Colab Project Studio launcher
+- [x] Persistent multi-project queue with continuous section-by-section rendering
+- [x] Queue crash recovery: completed projects/sections are skipped after Colab restart
+- [x] Cooperative pause after current section and continue-on-project-error policy
+- [x] Optional auto-merge per queued project
 
 ## P1 — narration quality and recovery
 
@@ -51,11 +55,10 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 3. [ ] Timeline and silence editor.
 4. [ ] WAV/MP3 export profiles.
 5. [ ] Project CLI runner / HTTP API.
-6. [ ] Batch multiple projects.
 
 ## Next priority
 
-The next implementation target is **Colab hardware detection + quality presets**.
+After Project Queue is validated in CI and real Colab use, the next implementation target returns to **Colab hardware detection + quality presets**.
 
 The goal is not to add more knobs. It is to reduce them:
 
