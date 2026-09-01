@@ -15,7 +15,6 @@ import torch
 
 from omnivoice import OmniVoice
 from omnivoice.cli.project_queue_ui import build_project_queue_demo
-from omnivoice.cli.project_studio import default_workspace
 from omnivoice.cli.project_studio_quality import (
     QualityPresetProjectStudioController,
     build_hardware_quality_demo,
@@ -25,6 +24,7 @@ from omnivoice.cli.project_studio_quality import (
 from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
 from omnivoice.hardware_quality import detect_hardware
+from omnivoice.runtime_workspace import detect_runtime_workspace
 from omnivoice.utils.common import get_best_device
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,7 @@ def build_demo(model, workspace: str | Path):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    runtime = detect_runtime_workspace()
     parser = argparse.ArgumentParser(
         description=(
             "Launch OmniVoice Project Studio with Text Doctor, Voice Doctor, "
@@ -65,12 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default="k2-fsa/OmniVoice")
     parser.add_argument("--device", default=None)
-    parser.add_argument("--workspace", default=str(default_workspace()))
+    parser.add_argument(
+        "--workspace",
+        default=str(runtime.root),
+        help=(
+            "Execution workspace. Kaggle defaults to "
+            "/kaggle/working/OmniVoiceStudio (local ephemeral SSD)."
+        ),
+    )
     parser.add_argument("--asr-model", default="openai/whisper-small.en")
     parser.add_argument(
         "--asr-device",
         default="cpu",
-        help="ASR device. T4/16 GB Colab is safest with cpu; see Hardware & Quality tab.",
+        help="ASR device. T4/16 GB Kaggle or Colab is safest with cpu; see Hardware & Quality tab.",
     )
     parser.add_argument("--ip", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
@@ -84,6 +92,21 @@ def main(argv=None) -> int:
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
     args = build_parser().parse_args(argv)
+    runtime = detect_runtime_workspace()
+    workspace = Path(args.workspace).expanduser()
+    workspace.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Runtime environment=%s execution_workspace=%s persistence=%s",
+        runtime.environment,
+        workspace,
+        runtime.persistence_backend,
+    )
+    if runtime.environment == "kaggle":
+        logger.warning(
+            "Kaggle execution workspace is local/ephemeral. "
+            "Remote persistence is intentionally not configured in this phase."
+        )
+
     device = args.device or get_best_device()
     hardware = detect_hardware()
     logger.info("Hardware: %s", hardware.summary())
@@ -103,7 +126,7 @@ def main(argv=None) -> int:
         asr_model_name=args.asr_model,
         asr_device=args.asr_device,
     )
-    demo = build_demo(model, args.workspace)
+    demo = build_demo(model, workspace)
     demo.queue().launch(
         server_name=args.ip,
         server_port=args.port,
