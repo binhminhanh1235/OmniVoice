@@ -96,6 +96,12 @@ class StyleBankProjectRunner:
         )
         base_generation = generation_config or OmniVoiceGenerationConfig()
 
+        effective_quality = (
+            self.quality_config
+            if base_robust.verify_with_asr
+            else replace(self.quality_config, pacing_guard=False)
+        )
+
         selected = None
         if section_ids is not None:
             selected = {item.upper() for item in section_ids}
@@ -139,15 +145,13 @@ class StyleBankProjectRunner:
                     if "duration" not in kwargs and "speed" not in kwargs:
                         kwargs["speed"] = profile.speed
 
-                    # A native instruct is used only when OmniVoice documents it.
-                    # Generic WARM/SOFT/EMPHASIZE styles remain reference metadata.
                     if profile.native_instruct and "instruct" not in kwargs:
                         kwargs["instruct"] = profile.native_instruct
 
                     generator = AdaptiveRobustLongFormGenerator(
                         self.model,
                         style_robust,
-                        self.quality_config,
+                        effective_quality,
                     )
                     result = generator.generate(
                         chunk.text,
