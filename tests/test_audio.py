@@ -57,9 +57,7 @@ def _silence(
     channels: int = 1,
     sample_rate: int = SAMPLE_RATE,
 ) -> np.ndarray:
-    return np.zeros(
-        (channels, _samples(milliseconds, sample_rate)), dtype=np.float32
-    )
+    return np.zeros((channels, _samples(milliseconds, sample_rate)), dtype=np.float32)
 
 
 def _audio_with_internal_silence(
@@ -79,9 +77,7 @@ def _audio_with_internal_silence(
 
 def _longest_silent_run_ms(audio: np.ndarray, sample_rate: int) -> float:
     silent = np.all(np.abs(audio) <= QUANTIZATION_ATOL, axis=0)
-    transitions = np.diff(
-        np.concatenate(([False], silent, [False])).astype(np.int8)
-    )
+    transitions = np.diff(np.concatenate(([False], silent, [False])).astype(np.int8))
     starts = np.flatnonzero(transitions == 1)
     ends = np.flatnonzero(transitions == -1)
     longest = np.max(ends - starts, initial=0)
@@ -130,10 +126,7 @@ def test_remove_silence_honors_total_internal_silence_limit(keep_mid_sil):
         keep_mid_sil=keep_mid_sil,
     )
 
-    assert (
-        _longest_silent_run_ms(result, SAMPLE_RATE)
-        <= keep_mid_sil + SEEK_STEP_MS
-    )
+    assert _longest_silent_run_ms(result, SAMPLE_RATE) <= keep_mid_sil + SEEK_STEP_MS
 
 
 def test_keep_mid_sil_does_not_change_detection_threshold():
@@ -191,9 +184,7 @@ def test_remove_silence_rejects_negative_existing_limits(argument):
 
 
 def test_remove_silence_trims_edges_independently_of_internal_silence():
-    audio = np.concatenate(
-        [_silence(500), _tone(200), _silence(700)], axis=-1
-    )
+    audio = np.concatenate([_silence(500), _tone(200), _silence(700)], axis=-1)
 
     result = remove_silence(
         audio,
@@ -286,9 +277,7 @@ def test_remove_silence_preserves_channels_for_empty_or_silent_audio(samples):
 
 
 def test_match_edge_silence_replaces_both_edges_with_exact_targets():
-    audio = np.concatenate(
-        [_silence(500), _tone(200), _silence(700)], axis=-1
-    )
+    audio = np.concatenate([_silence(500), _tone(200), _silence(700)], axis=-1)
 
     result = match_edge_silence(
         audio,
@@ -339,9 +328,7 @@ def test_match_edge_silence_is_sample_accurate_for_non_ten_millisecond_edges(
 
 
 def test_match_edge_silence_preserves_an_unspecified_edge():
-    audio = np.concatenate(
-        [_silence(503), _tone(200), _silence(707)], axis=-1
-    )
+    audio = np.concatenate([_silence(503), _tone(200), _silence(707)], axis=-1)
 
     result = match_edge_silence(
         audio,
@@ -357,9 +344,7 @@ def test_match_edge_silence_preserves_an_unspecified_edge():
 
 
 def test_match_edge_silence_preserves_an_unspecified_leading_edge():
-    audio = np.concatenate(
-        [_silence(503), _tone(200), _silence(707)], axis=-1
-    )
+    audio = np.concatenate([_silence(503), _tone(200), _silence(707)], axis=-1)
 
     result = match_edge_silence(
         audio,
@@ -399,9 +384,7 @@ def test_match_edge_silence_preserves_pcm_representable_low_level_attacks():
 
 
 def test_match_edge_silence_zero_targets_remove_both_edges():
-    audio = np.concatenate(
-        [_silence(500), _tone(200), _silence(700)], axis=-1
-    )
+    audio = np.concatenate([_silence(500), _tone(200), _silence(700)], axis=-1)
 
     result = match_edge_silence(
         audio,
@@ -563,9 +546,7 @@ def test_generation_config_forwards_output_silence_controls(monkeypatch):
         received.update(kwargs)
         return audio
 
-    monkeypatch.setattr(
-        omnivoice_module, "remove_silence", capture_remove_silence
-    )
+    monkeypatch.setattr(omnivoice_module, "remove_silence", capture_remove_silence)
     monkeypatch.setattr(
         omnivoice_module,
         "fade_and_pad_audio",
@@ -575,10 +556,7 @@ def test_generation_config_forwards_output_silence_controls(monkeypatch):
         omnivoice_module,
         "match_edge_silence",
         lambda audio, sampling_rate, **kwargs: (
-            received_targets.update(
-                {"sampling_rate": sampling_rate, **kwargs}
-            )
-            or audio
+            received_targets.update({"sampling_rate": sampling_rate, **kwargs}) or audio
         ),
     )
 
@@ -632,9 +610,7 @@ def test_generation_config_edge_targets_override_generic_padding():
         output_target_trail_silence_ms=75,
     )
     model_stub = SimpleNamespace(sampling_rate=SAMPLE_RATE)
-    audio = np.concatenate(
-        [_silence(500), _tone(200), _silence(700)], axis=-1
-    )
+    audio = np.concatenate([_silence(500), _tone(200), _silence(700)], axis=-1)
 
     result = OmniVoice._post_process_audio(
         model_stub,
@@ -740,13 +716,9 @@ def test_prompt_preprocessing_preserves_legacy_internal_silence_limit(monkeypatc
 
         @staticmethod
         def encode(audio):
-            return SimpleNamespace(
-                audio_codes=torch.zeros((1, 1, 1), dtype=torch.long)
-            )
+            return SimpleNamespace(audio_codes=torch.zeros((1, 1, 1), dtype=torch.long))
 
-    monkeypatch.setattr(
-        omnivoice_module, "remove_silence", capture_remove_silence
-    )
+    monkeypatch.setattr(omnivoice_module, "remove_silence", capture_remove_silence)
     model_stub = SimpleNamespace(
         sampling_rate=SAMPLE_RATE,
         audio_tokenizer=AudioTokenizerStub(),
