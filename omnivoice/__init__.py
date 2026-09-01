@@ -25,6 +25,13 @@ from omnivoice.models.omnivoice import (
     OmniVoiceGenerationConfig,
     VoiceClonePrompt,
 )
+from omnivoice.preview import (
+    PreviewResult,
+    PreviewTarget,
+    ProjectPreviewGenerator,
+    generate_project_previews,
+    select_preview_targets,
+)
 from omnivoice.project import (
     DEFAULT_STYLE_PROFILES,
     OmniVoiceProject,
@@ -79,4 +86,9 @@ __all__ = [
     "STYLE_VARIANT_FALLBACKS",
     "StyleBankProjectRunner",
     "generate_project_with_style_bank",
+    "PreviewTarget",
+    "PreviewResult",
+    "ProjectPreviewGenerator",
+    "select_preview_targets",
+    "generate_project_previews",
 ]
