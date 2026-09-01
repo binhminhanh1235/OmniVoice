@@ -69,7 +69,7 @@ def test_analyze_and_save_reuses_same_reference_file(tmp_path):
 
     assert report.recommended is True
     assert len(model.calls) == 1
-    assert model.calls[0][0] == audio_path
+    assert model.calls[0][0] == str(audio_path)
     assert model.calls[0][1] == "This is the exact reference transcript."
     entry = library.get("David")
     assert "WARM" in entry.variants
