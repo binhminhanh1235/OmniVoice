@@ -78,7 +78,6 @@ class SectionResumeProjectStudioController(ProjectStudioController):
                 save_manifest=False,
             )
         project.save()
-        write_section_status(project)
 
         try:
             generated = super().generate(
@@ -114,20 +113,26 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         language: Optional[str] = "en",
         strict: bool = False,
     ) -> OmniVoiceProject:
-        # Do not delegate to the base implementation here. The base method
-        # marks project.json pending and immediately calls self.generate(); if
-        # section-status.json still says verified, the resume-aware load would
-        # restore verified and cancel the requested regeneration.
+        # Do not delegate to the base implementation here. A verified sidecar
+        # must be invalidated before project.json is changed, otherwise a crash
+        # in that tiny window could restore the old verified section and cancel
+        # the requested regeneration.
         if not chunk_choice or "/" not in chunk_choice:
             raise ValueError("Select a chunk to regenerate")
         target = chunk_choice.split(" ", 1)[0]
         section_id, chunk_id = target.split("/", 1)
 
         project = self.load_project(project_path)
+
+        # Sidecar-first ordering records the user's regeneration intent even if
+        # the runtime dies before mark_chunk_for_regeneration saves project.json.
+        set_section_status(
+            project,
+            section_id,
+            "pending",
+            save_manifest=False,
+        )
         project.mark_chunk_for_regeneration(section_id, chunk_id)
-        # Durability ordering matters: persist the pending section sidecar
-        # before entering the resume-aware generate path.
-        write_section_status(project)
 
         generated = self.generate(
             project.root,
