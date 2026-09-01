@@ -71,6 +71,21 @@ def test_restore_uses_verified_sidecar_when_manifest_is_stale(tmp_path: Path):
     assert reloaded.get_section("S01").status == "verified"
 
 
+def test_matching_status_does_not_rewrite_project_manifest(tmp_path: Path):
+    project = _project(tmp_path)
+    _fake_completed_section(project, "S01")
+    write_section_status(project)
+
+    loaded = OmniVoiceProject.load(project.root)
+    manifest_path = project.root / OmniVoiceProject.MANIFEST_NAME
+    before = manifest_path.read_text(encoding="utf-8")
+
+    restore_section_status(loaded, sync_manifest=True)
+
+    after = manifest_path.read_text(encoding="utf-8")
+    assert after == before
+
+
 def test_interrupted_generating_state_recovers_to_pending(tmp_path: Path):
     project = _project(tmp_path)
     ensure_section_status(project)
