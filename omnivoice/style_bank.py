@@ -18,6 +18,10 @@ from typing import Any, Iterable, Optional
 
 import soundfile as sf
 
+from omnivoice.adaptive_quality import (
+    AdaptiveQualityConfig,
+    AdaptiveRobustLongFormGenerator,
+)
 from omnivoice.models.omnivoice import OmniVoiceGenerationConfig
 from omnivoice.project import (
     OmniVoiceProject,
@@ -26,7 +30,7 @@ from omnivoice.project import (
     _utc_now,
     _write_json,
 )
-from omnivoice.robust_longform import RobustLongFormConfig, RobustLongFormGenerator
+from omnivoice.robust_longform import RobustLongFormConfig
 from omnivoice.voice_library import VoiceLibrary, VoicePromptResolution
 
 
@@ -41,12 +45,14 @@ class StyleBankProjectRunner:
         voice_name: str,
         preferred_variant: str = "AUTO",
         style_profiles: Optional[dict[str, StyleProfile]] = None,
+        quality_config: Optional[AdaptiveQualityConfig] = None,
     ) -> None:
         self.model = model
         self.voice_library = voice_library
         self.voice_name = voice_name
         self.preferred_variant = preferred_variant
         self.style_resolver = OmniVoiceStyleResolver(style_profiles)
+        self.quality_config = quality_config or AdaptiveQualityConfig()
         self._resolution_cache: dict[str, VoicePromptResolution] = {}
 
     def resolve_voice(self, style: str) -> VoicePromptResolution:
@@ -138,7 +144,11 @@ class StyleBankProjectRunner:
                     if profile.native_instruct and "instruct" not in kwargs:
                         kwargs["instruct"] = profile.native_instruct
 
-                    generator = RobustLongFormGenerator(self.model, style_robust)
+                    generator = AdaptiveRobustLongFormGenerator(
+                        self.model,
+                        style_robust,
+                        self.quality_config,
+                    )
                     result = generator.generate(
                         chunk.text,
                         generation_config=base_generation,
@@ -163,6 +173,7 @@ class StyleBankProjectRunner:
                         "all_verified": result.all_verified,
                         "source_text": chunk.text,
                         "generated_chunks": result.chunks,
+                        "quality_guard": "adaptive_retry+pacing",
                         "reports": [asdict(report) for report in result.reports],
                     }
                     _write_json(report_path, report_payload)
@@ -194,6 +205,7 @@ def generate_project_with_style_bank(
     robust_config: Optional[RobustLongFormConfig] = None,
     generation_config: Optional[OmniVoiceGenerationConfig] = None,
     style_profiles: Optional[dict[str, StyleProfile]] = None,
+    quality_config: Optional[AdaptiveQualityConfig] = None,
     section_ids: Optional[Iterable[str]] = None,
     resume: bool = True,
     **generate_kwargs: Any,
@@ -204,6 +216,7 @@ def generate_project_with_style_bank(
         voice_name=voice_name,
         preferred_variant=preferred_variant,
         style_profiles=style_profiles,
+        quality_config=quality_config,
     )
     return runner.generate(
         project,
