@@ -20,9 +20,16 @@ from typing import Any, Iterable, Optional
 
 import soundfile as sf
 
+from omnivoice.adaptive_quality import AdaptiveRobustLongFormGenerator
 from omnivoice.models.omnivoice import OmniVoiceGenerationConfig
-from omnivoice.project import OmniVoiceProject, OmniVoiceStyleResolver, ProjectBeat, ProjectChunk, ProjectSection
-from omnivoice.robust_longform import RobustLongFormConfig, RobustLongFormGenerator
+from omnivoice.project import (
+    OmniVoiceProject,
+    OmniVoiceStyleResolver,
+    ProjectBeat,
+    ProjectChunk,
+    ProjectSection,
+)
+from omnivoice.robust_longform import RobustLongFormConfig
 from omnivoice.style_bank import StyleBankProjectRunner
 from omnivoice.voice_library import VoiceLibrary
 
@@ -173,7 +180,10 @@ class ProjectPreviewGenerator:
             if profile.native_instruct:
                 kwargs["instruct"] = profile.native_instruct
 
-            generated = RobustLongFormGenerator(self.model, style_robust).generate(
+            generated = AdaptiveRobustLongFormGenerator(
+                self.model,
+                style_robust,
+            ).generate(
                 target.text,
                 generation_config=base_generation,
                 **kwargs,
@@ -190,6 +200,7 @@ class ProjectPreviewGenerator:
                 "voice_variant": resolution.variant,
                 "voice_variant_fallback": resolution.used_fallback,
                 "all_verified": generated.all_verified,
+                "quality_guard": "adaptive_retry+pacing",
                 "reports": [asdict(report) for report in generated.reports],
             }
             report_path.write_text(
