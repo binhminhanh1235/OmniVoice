@@ -145,7 +145,7 @@ def test_recover_interrupted_running_item_as_pending(tmp_path):
     controller = FakeQueueController(tmp_path)
     project = make_project(tmp_path, "Alpha")
     store = ProjectQueueStore(tmp_path)
-    item = store.enqueue(controller, project.root)
+    store.enqueue(controller, project.root)
 
     manifest = store.load()
     manifest.items[0].status = "running"
@@ -163,14 +163,39 @@ def test_duplicate_active_project_is_rejected(tmp_path):
     controller = FakeQueueController(tmp_path)
     project = make_project(tmp_path, "Alpha")
     store = ProjectQueueStore(tmp_path)
-    store.enqueue(controller, project.root)
+    item = store.enqueue(controller, project.root)
 
-    try:
-        store.enqueue(controller, project.root)
-    except ValueError as exc:
-        assert "already queued" in str(exc)
-    else:
-        raise AssertionError("Expected active duplicate project to be rejected")
+    for status in ("pending", "failed", "needs_review"):
+        manifest = store.load()
+        manifest.items[0].status = status
+        store.save(manifest)
+        try:
+            store.enqueue(controller, project.root)
+        except ValueError as exc:
+            assert "already queued" in str(exc)
+        else:
+            raise AssertionError(f"Expected duplicate {status} project to be rejected")
+
+    assert store.load().items[0].id == item.id
+
+
+def test_running_item_cannot_be_removed_or_requeued(tmp_path):
+    controller = FakeQueueController(tmp_path)
+    project = make_project(tmp_path, "Alpha")
+    store = ProjectQueueStore(tmp_path)
+    item = store.enqueue(controller, project.root)
+
+    manifest = store.load()
+    manifest.items[0].status = "running"
+    store.save(manifest)
+
+    for action in (store.remove, store.requeue):
+        try:
+            action(item.id)
+        except ValueError as exc:
+            assert "running project" in str(exc)
+        else:
+            raise AssertionError("Expected running queue mutation to be blocked")
 
 
 def test_queue_rows_include_progress_and_item_id(tmp_path):
