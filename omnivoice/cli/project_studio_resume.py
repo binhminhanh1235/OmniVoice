@@ -62,7 +62,7 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         )
         targets = incomplete_section_ids(project, requested) if resume else requested
 
-        # Nothing to synthesize.  Returning immediately is important after a
+        # Nothing to synthesize. Returning immediately is important after a
         # Colab restart because completed sections must never be rendered again.
         if not targets:
             write_section_status(project)
@@ -92,7 +92,7 @@ class SectionResumeProjectStudioController(ProjectStudioController):
             )
         except Exception:
             # Preserve whatever chunk/project checkpoints were successfully
-            # written before the failure.  Queued/generating sections are
+            # written before the failure. Queued/generating sections are
             # deliberately recoverable as pending on the next load.
             try:
                 failed = super().load_project(project.root)
@@ -114,16 +114,32 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         language: Optional[str] = "en",
         strict: bool = False,
     ) -> OmniVoiceProject:
-        project = super().regenerate_chunk(
-            project_path,
-            chunk_choice,
+        # Do not delegate to the base implementation here. The base method
+        # marks project.json pending and immediately calls self.generate(); if
+        # section-status.json still says verified, the resume-aware load would
+        # restore verified and cancel the requested regeneration.
+        if not chunk_choice or "/" not in chunk_choice:
+            raise ValueError("Select a chunk to regenerate")
+        target = chunk_choice.split(" ", 1)[0]
+        section_id, chunk_id = target.split("/", 1)
+
+        project = self.load_project(project_path)
+        project.mark_chunk_for_regeneration(section_id, chunk_id)
+        # Durability ordering matters: persist the pending section sidecar
+        # before entering the resume-aware generate path.
+        write_section_status(project)
+
+        generated = self.generate(
+            project.root,
             voice_name=voice_name,
             voice_variant=voice_variant,
             language=language,
+            section_ids=[section_id],
+            resume=True,
             strict=strict,
         )
-        write_section_status(project)
-        return project
+        write_section_status(generated)
+        return generated
 
 
 def _install_resume_controller() -> None:
