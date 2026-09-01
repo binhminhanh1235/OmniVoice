@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Launch the OmniVoice Gradio demo with semantic chunking, "
         "ASR verification, and failed-chunk retries."
     )
-    parser.set_defaults(asr_model="openai/whisper-small.en")
+    parser.set_defaults(asr_model="openai/whisper-small")
     parser.add_argument(
         "--no-robust",
         action="store_true",
