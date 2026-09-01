@@ -56,6 +56,15 @@ from omnivoice.robust_longform import (
     RobustLongFormResult,
     generate_robust_longform,
 )
+from omnivoice.section_history import (
+    HISTORY_DIR_NAME,
+    HISTORY_INDEX_NAME,
+    SectionVersion,
+    create_section_snapshot,
+    list_section_versions,
+    restore_section_version,
+    section_version_audio,
+)
 from omnivoice.section_status import (
     SECTION_STATUS_NAME,
     SectionStatusRestore,
@@ -121,6 +130,13 @@ __all__ = [
     "set_section_status",
     "section_is_complete",
     "incomplete_section_ids",
+    "HISTORY_DIR_NAME",
+    "HISTORY_INDEX_NAME",
+    "SectionVersion",
+    "create_section_snapshot",
+    "list_section_versions",
+    "restore_section_version",
+    "section_version_audio",
     "VoiceLibrary",
     "VoiceEntry",
     "VoiceVariant",
