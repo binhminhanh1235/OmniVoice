@@ -14,6 +14,7 @@ from omnivoice.cli import project_studio as studio_module
 from omnivoice.cli import project_studio_live as live_module
 from omnivoice.cli import project_studio_plus as plus_module
 from omnivoice.cli.project_studio import ProjectStudioController
+from omnivoice.cli.section_history_ui import build_section_history_demo
 from omnivoice.project import OmniVoiceProject
 from omnivoice.section_history import (
     SectionVersion,
@@ -69,8 +70,6 @@ class SectionResumeProjectStudioController(ProjectStudioController):
         )
         targets = incomplete_section_ids(project, requested) if resume else requested
 
-        # Forced re-rendering of an existing section must be reversible. The
-        # snapshot is taken before any status is changed or inference begins.
         if not resume:
             for section_id in targets:
                 create_section_snapshot(
@@ -208,8 +207,20 @@ def _install_resume_controller() -> None:
 
 
 def build_demo(model: Any, workspace: str | Path):
+    import gradio as gr
+
     _install_resume_controller()
-    return live_module.build_demo(model, workspace)
+    studio = live_module.build_demo(model, workspace)
+    history = build_section_history_demo(
+        model,
+        workspace,
+        controller_cls=SectionResumeProjectStudioController,
+    )
+    return gr.TabbedInterface(
+        [studio, history],
+        ["Studio", "Section History"],
+        title="OmniVoice Project Studio",
+    )
 
 
 def main(argv=None) -> int:
