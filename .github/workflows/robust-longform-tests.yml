@@ -6,6 +6,7 @@ on:
       - "omnivoice/adaptive_quality.py"
       - "omnivoice/text_doctor.py"
       - "omnivoice/voice_doctor.py"
+      - "omnivoice/voice_stability.py"
       - "omnivoice/section_status.py"
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
@@ -35,11 +36,13 @@ on:
       - "docs/text-doctor.md"
       - "docs/section-status-resume.md"
       - "docs/voice-doctor.md"
+      - "docs/voice-stability-score.md"
       - "tests/test_adaptive_quality.py"
       - "tests/test_text_doctor.py"
       - "tests/test_text_doctor_ui.py"
       - "tests/test_voice_doctor.py"
       - "tests/test_voice_doctor_ui.py"
+      - "tests/test_voice_stability.py"
       - "tests/test_section_status.py"
       - "tests/test_section_resume_controller.py"
       - "tests/test_robust_longform.py"
@@ -68,6 +71,7 @@ on:
       - "feat/text-doctor"
       - "feat/section-status-resume"
       - "feat/voice-doctor"
+      - "feat/voice-stability-score"
 
 jobs:
   test:
@@ -105,6 +109,7 @@ jobs:
             tests/test_text_doctor_ui.py \
             tests/test_voice_doctor.py \
             tests/test_voice_doctor_ui.py \
+            tests/test_voice_stability.py \
             tests/test_section_status.py \
             tests/test_section_resume_controller.py \
             tests/test_robust_longform.py \
