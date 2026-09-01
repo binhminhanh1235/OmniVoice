@@ -5,7 +5,7 @@
 
 """Persistent multi-project render queue for Project Studio.
 
-The queue is deliberately independent from Gradio.  It stores enough metadata
+The queue is deliberately independent from Gradio. It stores enough metadata
 under the Studio workspace to survive Colab/runtime restarts and delegates the
 actual section generation to the existing section-resume controller.
 
@@ -30,8 +30,9 @@ from omnivoice.section_status import incomplete_section_ids, section_is_complete
 
 QUEUE_FILE_NAME = "project-queue.json"
 QUEUE_VERSION = 1
-_ACTIVE_STATES = {"pending", "running", "paused"}
-_TERMINAL_STATES = {"completed", "needs_review", "failed", "cancelled"}
+# Failed/needs-review items are still owned by the queue and should be requeued
+# rather than duplicated accidentally.
+_ACTIVE_STATES = {"pending", "running", "paused", "failed", "needs_review"}
 
 
 def _utc_now() -> str:
@@ -142,10 +143,13 @@ class ProjectQueueStore:
         for item in manifest.items:
             if item.status == "running":
                 item.status = "pending"
-                item.error = "Recovered after interrupted runtime; resume will continue incomplete sections."
+                item.error = (
+                    "Recovered after interrupted runtime; resume will continue "
+                    "incomplete sections."
+                )
                 changed = True
         if manifest.paused:
-            # A pause request belongs to the dead process.  Re-opening Studio
+            # A pause request belongs to the dead process. Re-opening Studio
             # should not leave the queue permanently inert.
             manifest.paused = False
             changed = True
@@ -174,16 +178,24 @@ class ProjectQueueStore:
         selected_variant = (
             voice_variant or settings.get("voice_variant") or "AUTO"
         ).upper()
-        selected_language = language if language is not None else settings.get("language", "en")
+        selected_language = (
+            language if language is not None else settings.get("language", "en")
+        )
 
         manifest = self.load()
         project_root = str(project.root.resolve())
         for existing in manifest.items:
             if existing.project_path == project_root and existing.status in _ACTIVE_STATES:
-                raise ValueError(f"Project is already queued: {project.manifest.title}")
+                raise ValueError(
+                    f"Project is already queued as {existing.status}: "
+                    f"{project.manifest.title}. Remove or requeue the existing item."
+                )
 
         total = len(project.manifest.sections)
-        complete = sum(section_is_complete(project, section) for section in project.manifest.sections)
+        complete = sum(
+            section_is_complete(project, section)
+            for section in project.manifest.sections
+        )
         item = ProjectQueueItem(
             id=uuid.uuid4().hex[:12],
             project_path=project_root,
@@ -211,13 +223,19 @@ class ProjectQueueStore:
 
     def remove(self, item_id: str) -> ProjectQueueManifest:
         manifest = self.load()
-        manifest.items = [item for item in manifest.items if item.id != item_id]
+        item = self.find(manifest, item_id)
+        if item.status == "running":
+            raise ValueError("Cannot remove a running project. Pause the queue first.")
+        manifest.items = [candidate for candidate in manifest.items if candidate.id != item_id]
         self.save(manifest)
         return manifest
 
     def move(self, item_id: str, delta: int) -> ProjectQueueManifest:
         manifest = self.load()
-        index = next((i for i, item in enumerate(manifest.items) if item.id == item_id), None)
+        index = next(
+            (i for i, item in enumerate(manifest.items) if item.id == item_id),
+            None,
+        )
         if index is None:
             raise KeyError(item_id)
         target = max(0, min(len(manifest.items) - 1, index + int(delta)))
@@ -236,6 +254,8 @@ class ProjectQueueStore:
     def requeue(self, item_id: str) -> ProjectQueueManifest:
         manifest = self.load()
         item = self.find(manifest, item_id)
+        if item.status == "running":
+            raise ValueError("Cannot requeue a running project. Pause the queue first.")
         item.status = "pending"
         item.current_section = None
         item.error = None
@@ -267,7 +287,8 @@ class ProjectQueueRunner:
         project = self.controller.load_project(item.project_path)
         item.total_sections = len(project.manifest.sections)
         item.completed_sections = sum(
-            section_is_complete(project, section) for section in project.manifest.sections
+            section_is_complete(project, section)
+            for section in project.manifest.sections
         )
         return incomplete_section_ids(project)
 
@@ -287,13 +308,11 @@ class ProjectQueueRunner:
         continue_on_error: bool = True,
     ) -> Generator[QueueEvent, None, ProjectQueueManifest]:
         manifest = self.store.recover_interrupted()
-        if manifest.paused:
-            return manifest
 
         for seed in list(manifest.items):
             current_manifest = self.store.load()
             item = self.store.find(current_manifest, seed.id)
-            if item.status == "completed" or item.status == "cancelled":
+            if item.status in {"completed", "cancelled"}:
                 continue
             if item.status not in {"pending", "failed", "needs_review", "paused"}:
                 continue
@@ -323,7 +342,8 @@ class ProjectQueueRunner:
                 item.project_title,
                 "running",
                 None,
-                f"Starting {item.project_title}: {item.completed_sections}/{item.total_sections} sections complete.",
+                f"Starting {item.project_title}: "
+                f"{item.completed_sections}/{item.total_sections} sections complete.",
             )
 
             try:
@@ -362,7 +382,7 @@ class ProjectQueueRunner:
                         resume=True,
                         strict=item.strict,
                     )
-                    remaining = self._refresh_progress(item)
+                    self._refresh_progress(item)
                     self._save_item(item)
                     yield QueueEvent(
                         item.id,
@@ -393,9 +413,11 @@ class ProjectQueueRunner:
                             )
                             item.merged_audio = str(merged)
                         except Exception as exc:
-                            # Audio generation is still complete.  Keep the item
+                            # Audio generation is still complete. Keep the item
                             # completed and expose merge failure separately.
-                            item.error = f"Auto-merge failed: {type(exc).__name__}: {exc}"
+                            item.error = (
+                                f"Auto-merge failed: {type(exc).__name__}: {exc}"
+                            )
                     item.finished_at = _utc_now()
                 self._save_item(item)
                 yield QueueEvent(
