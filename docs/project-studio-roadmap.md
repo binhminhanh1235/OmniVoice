@@ -16,19 +16,20 @@ This roadmap prioritizes the workflow for long-form narrated projects on Google 
 - [x] Persistent Voice Library / cached `VoiceClonePrompt`
 - [x] Simple Gradio Project Studio
 - [x] Section/chunk status table
+- [x] Live per-section generation status
 - [x] Colab Project Studio launcher
 
 ## P1 — narration quality
 
-1. Voice Style Bank: `DEFAULT`, `WARM`, `SOFT`, `PRAYER`, optional `EMPHASIZE` reference variants.
-2. Style Resolver automatically chooses a matching saved voice variant when available, then falls back to delivery controls.
-3. Preview three representative samples before full rendering.
-4. Adaptive retry based on failure reason: repetition, omission, pacing, edge clipping.
-5. Pacing anomaly detector.
-6. Text Doctor: HTML/Unicode/number/abbreviation cleanup with visible diff.
-7. Voice Doctor: reference duration/noise/clipping/silence checks.
-8. Voice Stability Score from short clone probes.
-9. Section/chunk version history instead of overwriting the previous good output.
+- [x] Voice Style Bank: `DEFAULT`, `WARM`, `SOFT`, `PRAYER`, optional `EMPHASIZE` reference variants.
+- [x] Style Resolver automatically chooses a matching saved voice variant when available, then falls back to delivery controls.
+- [x] Preview three representative samples before full rendering.
+- [x] Adaptive retry based on failure reason: repetition, omission, pacing, text mismatch.
+- [x] Pacing anomaly detector with global fallback and optional Whisper word timestamps.
+- [ ] Text Doctor: HTML/Unicode/number/abbreviation cleanup with visible diff.
+- [ ] Voice Doctor: reference duration/noise/clipping/silence checks.
+- [ ] Voice Stability Score from short clone probes.
+- [ ] Section/chunk version history instead of overwriting the previous good output.
 
 ## P2 — efficiency
 
