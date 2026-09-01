@@ -9,6 +9,7 @@ on:
       - "omnivoice/voice_stability.py"
       - "omnivoice/reference_segment.py"
       - "omnivoice/project_queue.py"
+      - "omnivoice/project_status.py"
       - "omnivoice/section_status.py"
       - "omnivoice/section_history.py"
       - "omnivoice/robust_longform.py"
@@ -54,6 +55,7 @@ on:
       - "tests/test_reference_segment.py"
       - "tests/test_project_queue.py"
       - "tests/test_project_queue_ui.py"
+      - "tests/test_project_status.py"
       - "tests/test_section_status.py"
       - "tests/test_section_resume_controller.py"
       - "tests/test_section_history.py"
@@ -129,6 +131,7 @@ jobs:
             tests/test_reference_segment.py \
             tests/test_project_queue.py \
             tests/test_project_queue_ui.py \
+            tests/test_project_status.py \
             tests/test_section_status.py \
             tests/test_section_resume_controller.py \
             tests/test_section_history.py \
