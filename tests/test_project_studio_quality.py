@@ -4,6 +4,7 @@ from omnivoice.cli import project_studio_quality as quality_module
 from omnivoice.cli.project_studio_quality import (
     QualityPresetProjectStudioController,
     build_hardware_quality_demo,
+    build_quality_project_demo,
 )
 from omnivoice.hardware_quality import HardwareCapabilities
 from omnivoice.project_queue import ProjectQueueStore
@@ -37,6 +38,10 @@ class FakeRunner:
     def generate(self, project, **kwargs):
         self.calls.append(kwargs)
         return project.manifest
+
+
+class FakeModel:
+    sampling_rate = 24000
 
 
 def test_project_override_persists_to_studio_json(tmp_path):
@@ -142,8 +147,13 @@ def test_hardware_quality_demo_builds(tmp_path):
         recommended_preset="BALANCED",
     )
     demo = build_hardware_quality_demo(
-        object(),
+        FakeModel(),
         tmp_path,
         detector=lambda: hardware,
     )
+    assert demo is not None
+
+
+def test_quality_project_studio_builds(tmp_path):
+    demo = build_quality_project_demo(FakeModel(), tmp_path)
     assert demo is not None
