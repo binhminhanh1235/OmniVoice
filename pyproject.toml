@@ -68,7 +68,7 @@ omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
 omnivoice-demo = "omnivoice.cli.demo_robust:main"
 omnivoice-demo-legacy = "omnivoice.cli.demo:main"
-omnivoice-project-studio = "omnivoice.cli.project_studio_plus:main"
+omnivoice-project-studio = "omnivoice.cli.project_studio_live:main"
 omnivoice-merge-lora = "omnivoice.cli.merge_lora:main"
 
 [project.urls]
