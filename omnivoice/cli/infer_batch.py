@@ -48,7 +48,13 @@ from omnivoice.models.omnivoice import OmniVoice
 import soundfile as sf
 
 from omnivoice.utils.audio import load_audio
-from omnivoice.utils.common import get_best_device_with_count, str2bool
+from omnivoice.utils.common import (
+    get_best_device_with_count,
+    nonnegative_float,
+    nonnegative_int,
+    positive_unit_float,
+    str2bool,
+)
 from omnivoice.utils.data_utils import read_test_list
 from omnivoice.utils.duration import RuleDurationEstimator
 
@@ -166,8 +172,55 @@ def get_parser():
         "--postprocess_output",
         type=str2bool,
         default=True,
-        help="Whether to post-process generated audio (remove silence).",
+        help="Whether to shorten long internal silences and trim edge silence.",
     )
+    parser.add_argument(
+        "--output_min_silence_ms",
+        type=nonnegative_int,
+        default=500,
+        help="Minimum internal silence duration to shorten, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_keep_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Maximum total silence retained from each shortened gap. "
+        "Defaults to --output_min_silence_ms.",
+    )
+    parser.add_argument(
+        "--output_lead_silence_ms",
+        type=nonnegative_int,
+        default=100,
+        help="Leading silence retained before optional padding, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_trail_silence_ms",
+        type=nonnegative_int,
+        default=100,
+        help="Trailing silence retained before optional padding, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_peak_limit",
+        type=positive_unit_float,
+        default=None,
+        help="Optional final absolute peak ceiling in the interval (0, 1].",
+    )
+    parser.add_argument(
+        "--output_target_lead_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Optional exact final leading silence in milliseconds. This "
+        "overrides generic edge padding on the leading side.",
+    )
+    parser.add_argument(
+        "--output_target_trail_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Optional exact final trailing silence in milliseconds. This "
+        "overrides generic edge padding on the trailing side.",
+    )
+    parser.add_argument("--pad_duration", type=nonnegative_float, default=0.1)
+    parser.add_argument("--fade_duration", type=nonnegative_float, default=0.1)
     parser.add_argument(
         "--layer_penalty_factor",
         type=float,

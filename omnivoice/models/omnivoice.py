@@ -61,9 +61,15 @@ from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, AttentionInterf
 from transformers.models.auto import CONFIG_MAPPING, AutoConfig
 
 from omnivoice.utils.audio import (
+    _validate_nonnegative_integer,
+    _validate_nonnegative_real,
+    _validate_optional_nonnegative_integer,
+    _validate_optional_peak_limit,
     cross_fade_chunks,
     fade_and_pad_audio,
+    limit_audio_peak,
     load_audio,
+    match_edge_silence,
     remove_silence,
     trim_long_audio,
 )
@@ -187,6 +193,46 @@ class OmniVoiceGenerationConfig:
     audio_chunk_threshold: float = 30.0
     pad_duration: float = 0.1
     fade_duration: float = 0.1
+    output_min_silence_ms: int = 500
+    output_keep_silence_ms: Optional[int] = None
+    output_lead_silence_ms: int = 100
+    output_trail_silence_ms: int = 100
+    output_peak_limit: Optional[float] = None
+    output_target_lead_silence_ms: Optional[int] = None
+    output_target_trail_silence_ms: Optional[int] = None
+
+    def __post_init__(self):
+        for name in (
+            "output_min_silence_ms",
+            "output_lead_silence_ms",
+            "output_trail_silence_ms",
+        ):
+            setattr(
+                self,
+                name,
+                _validate_nonnegative_integer(name, getattr(self, name)),
+            )
+        if self.output_keep_silence_ms is not None:
+            self.output_keep_silence_ms = _validate_nonnegative_integer(
+                "output_keep_silence_ms", self.output_keep_silence_ms
+            )
+        self.pad_duration = _validate_nonnegative_real(
+            "pad_duration", self.pad_duration
+        )
+        self.fade_duration = _validate_nonnegative_real(
+            "fade_duration", self.fade_duration
+        )
+        self.output_peak_limit = _validate_optional_peak_limit(
+            "output_peak_limit", self.output_peak_limit
+        )
+        self.output_target_lead_silence_ms = _validate_optional_nonnegative_integer(
+            "output_target_lead_silence_ms",
+            self.output_target_lead_silence_ms,
+        )
+        self.output_target_trail_silence_ms = _validate_optional_nonnegative_integer(
+            "output_target_trail_silence_ms",
+            self.output_target_trail_silence_ms,
+        )
 
     @classmethod
     def from_dict(cls, kwargs_dict):
@@ -626,10 +672,11 @@ class OmniVoice(PreTrainedModel):
                 or :meth:`VoiceClonePrompt.load`.
                 If provided, it overrides ``ref_text`` and ``ref_audio``.
             instruct: Style instruction for voice design mode.
-            duration: Fixed output duration in seconds. If a single float,
-                applies to all items; if a list, one value per item.
+            duration: Pre-synthesis audio-token budget in seconds. If a single
+                float, applies to all items; if a list, one value per item.
                 ``None`` (default) lets the model estimate duration from text.
-                Overrides ``speed`` when both are provided.
+                Overrides ``speed`` when both are provided. Post-processing
+                can change the physical WAV duration.
             speed: Speaking speed factor. ``> 1.0`` for faster, ``< 1.0`` for
                 slower. If a list, one value per item. ``None`` (default) uses
                 the model's default estimation.
@@ -649,7 +696,27 @@ class OmniVoice(PreTrainedModel):
                 num_step: Number of iterative decoding steps.
                 guidance_scale: Classifier-free guidance scale.
                 t_shift: Time-step shift (smaller → emphasise low-SNR).
-                postprocess_output: Post-process output (remove silence, fade-in/out, pad edges).
+                postprocess_output: Shorten long output silences. Fade and edge
+                    padding remain independently controlled by
+                    ``fade_duration`` and ``pad_duration``.
+                output_min_silence_ms: Minimum internal silence duration to
+                    shorten, in milliseconds.
+                output_keep_silence_ms: Maximum total silence retained for
+                    each shortened internal gap, in milliseconds. ``None``
+                    uses ``output_min_silence_ms``.
+                output_lead_silence_ms: Leading silence retained, in
+                    milliseconds.
+                output_trail_silence_ms: Trailing silence retained, in
+                    milliseconds.
+                output_peak_limit: Optional final absolute peak ceiling in the
+                    interval ``(0, 1]``. The complete waveform is scaled only
+                    when its peak exceeds this value.
+                output_target_lead_silence_ms: Optional exact final leading
+                    silence in milliseconds. ``None`` preserves the processed
+                    edge. The target overrides generic edge padding.
+                output_target_trail_silence_ms: Optional exact final trailing
+                    silence in milliseconds. ``None`` preserves the processed
+                    edge. The target overrides generic edge padding.
                 layer_penalty_factor: Penalty encouraging earlier codebook
                     layers to unmask first.
                 position_temperature: Temperature for position selection.
@@ -789,6 +856,10 @@ class OmniVoice(PreTrainedModel):
                 mid_sil=200,
                 lead_sil=100,
                 trail_sil=200,
+                # Preserve the historical prompt-conditioning waveform. Before
+                # keep_mid_sil was explicit, pydub retained mid_sil on both
+                # sides of a split (up to 400 ms total here).
+                keep_mid_sil=400,
             )
             if ref_wav.shape[-1] == 0:
                 raise ValueError(
@@ -890,9 +961,10 @@ class OmniVoice(PreTrainedModel):
             generated_audio = remove_silence(
                 generated_audio,
                 self.sampling_rate,
-                mid_sil=500,
-                lead_sil=100,
-                trail_sil=100,
+                mid_sil=gen_config.output_min_silence_ms,
+                lead_sil=gen_config.output_lead_silence_ms,
+                trail_sil=gen_config.output_trail_silence_ms,
+                keep_mid_sil=gen_config.output_keep_silence_ms,
             )
 
         if ref_rms is not None and ref_rms < 0.1:
@@ -902,11 +974,22 @@ class OmniVoice(PreTrainedModel):
             if peak > 1e-6:
                 generated_audio = generated_audio / peak * 0.5
 
+        generated_audio = limit_audio_peak(
+            generated_audio,
+            gen_config.output_peak_limit,
+        )
+
         generated_audio = fade_and_pad_audio(
             generated_audio,
             pad_duration=gen_config.pad_duration,
             fade_duration=gen_config.fade_duration,
             sample_rate=self.sampling_rate,
+        )
+        generated_audio = match_edge_silence(
+            generated_audio,
+            self.sampling_rate,
+            target_lead_silence_ms=gen_config.output_target_lead_silence_ms,
+            target_trail_silence_ms=gen_config.output_target_trail_silence_ms,
         )
         return generated_audio
 
@@ -1136,8 +1219,8 @@ class OmniVoice(PreTrainedModel):
             )
             num_target_tokens_list.append(est)
 
-        # Per-item duration overrides: set target_lens to exact frame count
-        # and compute speed ratio so chunked generation scales proportionally.
+        # Per-item duration overrides set the exact target audio-token frame count
+        # and compute a speed ratio so chunked generation scales proportionally.
         speed_list: Optional[List[float]] = None
         if durations is not None:
             frame_rate = self.audio_tokenizer.config.frame_rate
