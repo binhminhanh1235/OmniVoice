@@ -27,7 +27,9 @@ def build_demo(model, workspace: str | Path):
     import gradio as gr
 
     text_doctor = build_text_doctor_demo()
-    voice_doctor = build_voice_doctor_demo()
+    # Pass the already-loaded model and the same workspace so Voice Doctor can
+    # save the analyzed reference directly into the shared Voice Library.
+    voice_doctor = build_voice_doctor_demo(model, workspace)
     studio = build_resume_project_studio(model, workspace)
     return gr.TabbedInterface(
         [text_doctor, voice_doctor, studio],
