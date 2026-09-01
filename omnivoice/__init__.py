@@ -42,6 +42,7 @@ from omnivoice.robust_longform import (
     RobustLongFormResult,
     generate_robust_longform,
 )
+from omnivoice.voice_library import VoiceEntry, VoiceLibrary, VoiceVariant
 
 __all__ = [
     "OmniVoice",
@@ -61,4 +62,7 @@ __all__ = [
     "OmniVoiceStyleResolver",
     "DEFAULT_STYLE_PROFILES",
     "parse_project_script",
+    "VoiceLibrary",
+    "VoiceEntry",
+    "VoiceVariant",
 ]
