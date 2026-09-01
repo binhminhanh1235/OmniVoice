@@ -96,6 +96,15 @@ class StyleBankProjectRunner:
         )
         base_generation = generation_config or OmniVoiceGenerationConfig()
 
+        # `verify_with_asr=False` is an explicit request to bypass quality
+        # verification. Keep that contract intact by disabling the pacing guard
+        # too; otherwise tiny synthetic/test audio can trigger unrelated retries.
+        effective_quality = (
+            self.quality_config
+            if base_robust.verify_with_asr
+            else replace(self.quality_config, pacing_guard=False)
+        )
+
         selected = None
         if section_ids is not None:
             selected = {item.upper() for item in section_ids}
@@ -147,7 +156,7 @@ class StyleBankProjectRunner:
                     generator = AdaptiveRobustLongFormGenerator(
                         self.model,
                         style_robust,
-                        self.quality_config,
+                        effective_quality,
                     )
                     result = generator.generate(
                         chunk.text,
