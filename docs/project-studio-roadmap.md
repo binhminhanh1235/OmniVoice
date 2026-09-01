@@ -24,6 +24,11 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 - [x] Queue crash recovery: completed projects/sections are skipped after Colab restart
 - [x] Cooperative pause after current section and continue-on-project-error policy
 - [x] Optional auto-merge per queued project
+- [x] Project-level render status derived from `section-status.json`
+- [x] Queue Project Browser filtered by `PENDING`, `GENERATING`, `NEEDS_REVIEW`, `FAILED`, `DONE`
+- [x] Default queue filter hides `DONE` and shows `PENDING + GENERATING`
+- [x] Hide projects already represented in the queue
+- [x] Bulk-add all filtered projects using each project's saved Studio settings
 
 ## P1 — narration quality and recovery
 
@@ -58,7 +63,7 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 
 ## Next priority
 
-After Project Queue is validated in CI and real Colab use, the next implementation target returns to **Colab hardware detection + quality presets**.
+After Project Queue status/filtering is validated in CI and real Colab use, the next implementation target returns to **Colab hardware detection + quality presets**.
 
 The goal is not to add more knobs. It is to reduce them:
 
