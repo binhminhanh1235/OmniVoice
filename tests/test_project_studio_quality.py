@@ -6,6 +6,7 @@ from omnivoice.cli.project_studio_quality import (
     build_hardware_quality_demo,
 )
 from omnivoice.hardware_quality import HardwareCapabilities
+from omnivoice.project_queue import ProjectQueueStore
 
 
 SCRIPT = """# Quality Test
@@ -102,6 +103,31 @@ def test_workspace_fast_policy_is_used_when_project_inherits(tmp_path, monkeypat
     assert call["generation_config"].num_step == 24
     assert call["robust_config"].max_retries == 1
     assert call["robust_config"].verify_with_asr is True
+
+
+def test_queue_snapshots_project_quality_policy(tmp_path):
+    controller = QualityPresetProjectStudioController(object(), tmp_path)
+    project = controller.create_project(SCRIPT)
+
+    # Queue requires a saved voice name. No actual prompt is loaded at enqueue time.
+    (project.root / "studio.json").write_text(
+        json.dumps(
+            {
+                "voice_name": "Narrator",
+                "voice_variant": "AUTO",
+                "language": "en",
+                "quality_preset": "BALANCED",
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = ProjectQueueStore(tmp_path)
+    item = store.enqueue(controller, project.root, auto_merge=False)
+    assert item.quality_preset == "BALANCED"
+
+    # Later project/workspace edits do not mutate the already persisted queue item.
+    controller.set_project_quality_preset(project.root, "FAST")
+    assert store.load().items[0].quality_preset == "BALANCED"
 
 
 def test_hardware_quality_demo_builds(tmp_path):
