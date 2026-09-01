@@ -65,12 +65,9 @@ def _flatten_targets(project: OmniVoiceProject):
 
 
 def select_preview_targets(project: OmniVoiceProject) -> list[PreviewTarget]:
-    """Pick opening/middle/ending chunks while avoiding duplicate samples."""
-
     items = _flatten_targets(project)
     if not items:
         return []
-
     requested = [
         ("opening", 0),
         ("middle", len(items) // 2),
@@ -97,8 +94,6 @@ def select_preview_targets(project: OmniVoiceProject) -> list[PreviewTarget]:
 
 
 class ProjectPreviewGenerator:
-    """Generate representative samples without mutating project state."""
-
     def __init__(
         self,
         model: Any,
@@ -147,6 +142,12 @@ class ProjectPreviewGenerator:
             fade_duration=0.0,
         )
 
+        effective_quality = (
+            self.style_bank.quality_config
+            if base_robust.verify_with_asr
+            else replace(self.style_bank.quality_config, pacing_guard=False)
+        )
+
         allowed = {item.lower() for item in labels} if labels is not None else None
         targets = [
             target
@@ -183,6 +184,7 @@ class ProjectPreviewGenerator:
             generated = AdaptiveRobustLongFormGenerator(
                 self.model,
                 style_robust,
+                effective_quality,
             ).generate(
                 target.text,
                 generation_config=base_generation,
