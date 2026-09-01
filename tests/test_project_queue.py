@@ -198,6 +198,24 @@ def test_running_item_cannot_be_removed_or_requeued(tmp_path):
             raise AssertionError("Expected running queue mutation to be blocked")
 
 
+def test_future_pending_item_can_be_removed_while_queue_is_running(tmp_path):
+    controller = FakeQueueController(tmp_path)
+    alpha = make_project(tmp_path, "Alpha")
+    beta = make_project(tmp_path, "Beta")
+    store = ProjectQueueStore(tmp_path)
+    store.enqueue(controller, alpha.root, auto_merge=False)
+    beta_item = store.enqueue(controller, beta.root, auto_merge=False)
+
+    events = ProjectQueueRunner(controller, store).run()
+    first_event = next(events)
+    assert first_event.project_title == "Alpha"
+    store.remove(beta_item.id)
+
+    list(events)
+    assert controller.calls == [("Alpha", "S01"), ("Alpha", "S02")]
+    assert [item.project_title for item in store.load().items] == ["Alpha"]
+
+
 def test_queue_rows_include_progress_and_item_id(tmp_path):
     controller = FakeQueueController(tmp_path)
     project = make_project(tmp_path, "Alpha")
