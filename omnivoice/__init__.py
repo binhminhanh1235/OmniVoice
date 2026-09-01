@@ -25,10 +25,20 @@ from omnivoice.models.omnivoice import (
     OmniVoiceGenerationConfig,
     VoiceClonePrompt,
 )
+from omnivoice.robust_longform import (
+    RobustLongFormConfig,
+    RobustLongFormGenerator,
+    RobustLongFormResult,
+    generate_robust_longform,
+)
 
 __all__ = [
     "OmniVoice",
     "OmniVoiceConfig",
     "OmniVoiceGenerationConfig",
     "VoiceClonePrompt",
+    "RobustLongFormConfig",
+    "RobustLongFormGenerator",
+    "RobustLongFormResult",
+    "generate_robust_longform",
 ]
