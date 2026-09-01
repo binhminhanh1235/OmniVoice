@@ -50,6 +50,9 @@ def build_project_queue_demo(
 
     controller = controller_cls(model, workspace)
     store = ProjectQueueStore(workspace)
+    # Recovery is intentionally performed once when the app starts.  A normal
+    # Refresh must never rewrite a genuinely RUNNING item while generation is
+    # still active in this process.
     store.recover_interrupted()
     runner = ProjectQueueRunner(controller, store)
 
@@ -68,7 +71,7 @@ def build_project_queue_demo(
         project_value = projects[0] if projects else None
         voice_value = voices[0] if voices else None
         variants = controller.voices.variant_choices(voice_value) if voice_value else []
-        manifest = store.recover_interrupted()
+        manifest = store.load()
         choices = _item_choices(manifest)
         return (
             gr.update(choices=projects, value=project_value),
