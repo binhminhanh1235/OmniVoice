@@ -49,6 +49,7 @@ on:
       - "tests/test_section_status.py"
       - "tests/test_section_resume_controller.py"
       - "tests/test_section_history.py"
+      - "tests/test_section_history_ui.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
       - "tests/test_preview.py"
@@ -118,6 +119,7 @@ jobs:
             tests/test_section_status.py \
             tests/test_section_resume_controller.py \
             tests/test_section_history.py \
+            tests/test_section_history_ui.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
             tests/test_preview.py \
