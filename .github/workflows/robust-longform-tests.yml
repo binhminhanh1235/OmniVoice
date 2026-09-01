@@ -8,6 +8,7 @@ on:
       - "omnivoice/voice_doctor.py"
       - "omnivoice/voice_stability.py"
       - "omnivoice/reference_segment.py"
+      - "omnivoice/project_queue.py"
       - "omnivoice/section_status.py"
       - "omnivoice/section_history.py"
       - "omnivoice/robust_longform.py"
@@ -23,6 +24,7 @@ on:
       - "omnivoice/cli/project_studio_resume.py"
       - "omnivoice/cli/project_studio_text_resume.py"
       - "omnivoice/cli/project_studio_voice_doctor.py"
+      - "omnivoice/cli/project_queue_ui.py"
       - "omnivoice/cli/section_history_ui.py"
       - "omnivoice/cli/text_doctor_ui.py"
       - "omnivoice/cli/voice_doctor_ui.py"
@@ -32,6 +34,7 @@ on:
       - "pyproject.toml"
       - "docs/project-studio.md"
       - "docs/project-studio-roadmap.md"
+      - "docs/project-queue.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
       - "docs/live-section-status.md"
@@ -49,6 +52,8 @@ on:
       - "tests/test_voice_doctor_ui.py"
       - "tests/test_voice_stability.py"
       - "tests/test_reference_segment.py"
+      - "tests/test_project_queue.py"
+      - "tests/test_project_queue_ui.py"
       - "tests/test_section_status.py"
       - "tests/test_section_resume_controller.py"
       - "tests/test_section_history.py"
@@ -82,6 +87,7 @@ on:
       - "feat/voice-stability-score"
       - "feat/section-version-history"
       - "feat/auto-reference-segment"
+      - "feat/project-queue"
 
 jobs:
   test:
@@ -121,6 +127,8 @@ jobs:
             tests/test_voice_doctor_ui.py \
             tests/test_voice_stability.py \
             tests/test_reference_segment.py \
+            tests/test_project_queue.py \
+            tests/test_project_queue_ui.py \
             tests/test_section_status.py \
             tests/test_section_resume_controller.py \
             tests/test_section_history.py \
