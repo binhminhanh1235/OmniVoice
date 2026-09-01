@@ -14,6 +14,11 @@ A section recorded as ``verified`` is considered complete only when its section
 WAV still exists. Interrupted ``generating``/``queued`` states are recovered
 as ``pending`` when the project is loaded, so a killed runtime cannot leave a
 section permanently stuck in an in-progress state.
+
+For section-level transitions the sidecar is written before the full manifest.
+That ordering deliberately makes the sidecar the crash-consistent resume
+authority: if the runtime dies between the two writes, the next load follows
+the newer section checkpoint and reconciles ``project.json`` to it.
 """
 
 from __future__ import annotations
@@ -171,13 +176,13 @@ def restore_section_status(
     sync_manifest: bool = False,
     create_if_missing: bool = True,
 ) -> SectionStatusRestore:
-    """Overlay section checkpoints onto a loaded project manifest.
+    """Overlay the section checkpoint onto a loaded project manifest.
 
     ``verified`` is restored only when the final section WAV exists. Stale
-    ``generating`` and ``queued`` states become ``pending`` in memory because
-    they represent interrupted work. When ``sync_manifest`` is true, the
-    reconciled state is written back to ``project.json`` only if reconciliation
-    actually changed the manifest.
+    ``generating`` and ``queued`` states become ``pending`` because they
+    represent interrupted work. Recovered interrupted/invalid states are also
+    flushed back to the sidecar so the checkpoint does not remain permanently
+    stuck on an obsolete value.
     """
 
     path = section_status_path(project)
@@ -205,6 +210,7 @@ def restore_section_status(
     interrupted: list[str] = []
     invalid_complete: list[str] = []
     changed = False
+    sidecar_recovered = False
 
     for section in project.manifest.sections:
         record = records.get(section.id)
@@ -228,10 +234,15 @@ def restore_section_status(
                 section.status = "pending"
                 section.audio_file = None
                 invalid_complete.append(section.id)
+                sidecar_recovered = True
         elif raw_status in _INTERRUPTED_STATES:
             section.status = "pending"
             interrupted.append(section.id)
+            sidecar_recovered = True
         else:
+            # For section-level resume the sidecar intentionally wins over a
+            # conflicting manifest. This is what makes a pre-regeneration
+            # `pending` checkpoint safe even if the old final WAV still exists.
             section.status = raw_status
 
         if record.get("updated_at"):
@@ -240,6 +251,10 @@ def restore_section_status(
         if _section_state_signature(section) != before:
             changed = True
 
+    # Persist recovery to the resume authority first, then reconcile the larger
+    # manifest. A crash between these writes remains safe on the next load.
+    if sidecar_recovered:
+        write_section_status(project)
     if sync_manifest and changed:
         project.save()
 
@@ -257,14 +272,15 @@ def set_section_status(
     *,
     save_manifest: bool = True,
 ) -> Path:
-    """Set one section state and checkpoint the complete section-status table."""
+    """Set one section state using sidecar-first durability ordering."""
 
     section = project.get_section(section_id)
     section.status = status.lower()
     section.updated_at = _utc_now()
+    path = write_section_status(project)
     if save_manifest:
         project.save()
-    return write_section_status(project)
+    return path
 
 
 def incomplete_section_ids(
