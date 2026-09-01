@@ -75,6 +75,13 @@ from omnivoice.voice_doctor import (
     VoiceDoctorReport,
     analyze_voice_reference,
 )
+from omnivoice.voice_stability import (
+    DEFAULT_STABILITY_TEXTS,
+    VoiceStabilityConfig,
+    VoiceStabilityReport,
+    VoiceStabilitySample,
+    evaluate_voice_stability,
+)
 from omnivoice.voice_library import (
     STYLE_VARIANT_FALLBACKS,
     VoiceEntry,
@@ -122,6 +129,11 @@ __all__ = [
     "VoiceDoctorConfig",
     "VoiceDoctorReport",
     "analyze_voice_reference",
+    "DEFAULT_STABILITY_TEXTS",
+    "VoiceStabilityConfig",
+    "VoiceStabilitySample",
+    "VoiceStabilityReport",
+    "evaluate_voice_stability",
     "StyleBankProjectRunner",
     "generate_project_with_style_bank",
     "PreviewTarget",
