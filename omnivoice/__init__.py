@@ -56,6 +56,16 @@ from omnivoice.robust_longform import (
     RobustLongFormResult,
     generate_robust_longform,
 )
+from omnivoice.section_status import (
+    SECTION_STATUS_NAME,
+    SectionStatusRestore,
+    ensure_section_status,
+    incomplete_section_ids,
+    restore_section_status,
+    section_is_complete,
+    set_section_status,
+    write_section_status,
+)
 from omnivoice.style_bank import (
     StyleBankProjectRunner,
     generate_project_with_style_bank,
@@ -91,6 +101,14 @@ __all__ = [
     "OmniVoiceStyleResolver",
     "DEFAULT_STYLE_PROFILES",
     "parse_project_script",
+    "SECTION_STATUS_NAME",
+    "SectionStatusRestore",
+    "ensure_section_status",
+    "restore_section_status",
+    "write_section_status",
+    "set_section_status",
+    "section_is_complete",
+    "incomplete_section_ids",
     "VoiceLibrary",
     "VoiceEntry",
     "VoiceVariant",
