@@ -36,6 +36,7 @@ on:
     branches:
       - "fix/robust-longform-tts"
       - "fix/gradio-robust-longform"
+      - "fix/project-studio-generate-diagnostics"
       - "feat/project-studio-p0"
       - "feat/project-studio-p1-style-bank"
       - "feat/project-studio-p1-preview"
