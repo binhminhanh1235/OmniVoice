@@ -27,7 +27,13 @@ import torch
 import soundfile as sf
 
 from omnivoice.models.omnivoice import OmniVoice
-from omnivoice.utils.common import get_best_device, str2bool
+from omnivoice.utils.common import (
+    get_best_device,
+    nonnegative_float,
+    nonnegative_int,
+    positive_unit_float,
+    str2bool,
+)
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -95,9 +101,9 @@ def get_parser() -> argparse.ArgumentParser:
         "--duration",
         type=float,
         default=None,
-        help="Fixed output duration in seconds. If set, overrides the "
-        "model's duration estimation. The speed factor is automatically "
-        "adjusted to match while preserving language-aware pacing.",
+        help="Pre-synthesis audio-token budget in seconds. If set, overrides "
+        "the model's duration estimation. Output post-processing can change "
+        "the physical WAV duration.",
     )
     parser.add_argument("--t_shift", type=float, default=0.1)
     parser.add_argument("--denoise", type=str2bool, default=True)
@@ -105,7 +111,55 @@ def get_parser() -> argparse.ArgumentParser:
         "--postprocess_output",
         type=str2bool,
         default=True,
+        help="Whether to shorten long internal silences and trim edge silence.",
     )
+    parser.add_argument(
+        "--output_min_silence_ms",
+        type=nonnegative_int,
+        default=500,
+        help="Minimum internal silence duration to shorten, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_keep_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Maximum total silence retained from each shortened gap. "
+        "Defaults to --output_min_silence_ms.",
+    )
+    parser.add_argument(
+        "--output_lead_silence_ms",
+        type=nonnegative_int,
+        default=100,
+        help="Leading silence retained before optional padding, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_trail_silence_ms",
+        type=nonnegative_int,
+        default=100,
+        help="Trailing silence retained before optional padding, in milliseconds.",
+    )
+    parser.add_argument(
+        "--output_peak_limit",
+        type=positive_unit_float,
+        default=None,
+        help="Optional final absolute peak ceiling in the interval (0, 1].",
+    )
+    parser.add_argument(
+        "--output_target_lead_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Optional exact final leading silence in milliseconds. This "
+        "overrides generic edge padding on the leading side.",
+    )
+    parser.add_argument(
+        "--output_target_trail_silence_ms",
+        type=nonnegative_int,
+        default=None,
+        help="Optional exact final trailing silence in milliseconds. This "
+        "overrides generic edge padding on the trailing side.",
+    )
+    parser.add_argument("--pad_duration", type=nonnegative_float, default=0.1)
+    parser.add_argument("--fade_duration", type=nonnegative_float, default=0.1)
     parser.add_argument("--layer_penalty_factor", type=float, default=5.0)
     parser.add_argument("--position_temperature", type=float, default=5.0)
     parser.add_argument("--class_temperature", type=float, default=0.0)
@@ -150,6 +204,15 @@ def main():
         t_shift=args.t_shift,
         denoise=args.denoise,
         postprocess_output=args.postprocess_output,
+        output_min_silence_ms=args.output_min_silence_ms,
+        output_keep_silence_ms=args.output_keep_silence_ms,
+        output_lead_silence_ms=args.output_lead_silence_ms,
+        output_trail_silence_ms=args.output_trail_silence_ms,
+        output_peak_limit=args.output_peak_limit,
+        output_target_lead_silence_ms=args.output_target_lead_silence_ms,
+        output_target_trail_silence_ms=args.output_target_trail_silence_ms,
+        pad_duration=args.pad_duration,
+        fade_duration=args.fade_duration,
         layer_penalty_factor=args.layer_penalty_factor,
         position_temperature=args.position_temperature,
         class_temperature=args.class_temperature,

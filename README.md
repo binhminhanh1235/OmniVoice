@@ -240,7 +240,7 @@ audio = model.generate(
     text="...",
     num_step=32,  # diffusion steps (or 16 for faster inference)
     speed=1.0,     # speed factor (>1.0 faster, <1.0 slower)
-    duration=10.0, # fixed output duration in seconds (overrides speed)
+    duration=10.0, # pre-synthesis audio-token budget (overrides speed)
     # ... more options
 )
 ```
@@ -274,7 +274,7 @@ audio = model.generate(text="He plays the [B EY1 S] guitar while catching a [B A
 
 ## Command-Line Tools
 
-Three CLI entry points are provided. The CLI tools support all features available in the Python API (voice cloning, voice design, auto voice, generation parameters, etc.) — all controlled via command-line arguments.
+Three CLI entry points are provided. The single-item and batch tools expose voice cloning, voice design, auto voice, and generation parameters as command-line arguments. The interactive demo exposes the most commonly used controls in a web UI.
 
 | Command | Description | Source |
 |---|---|---|
@@ -332,7 +332,7 @@ The test list is a JSONL file where each line is a JSON object:
 ```
 Only `id` and `text` are mandatory fields. `ref_audio` and `ref_text` are used in voice cloning mode. `instruct` is used in voice design mode. If no reference audio or instruct are provided, the model will generate text in a random voice.
 
-`language_id`, `duration`, and `speed` are optional. `duration` (in seconds) fixes the output length; `speed` controls the speaking rate. If `duration` and `speed` are both provided, `speed` will be ignored.
+`language_id`, `duration`, and `speed` are optional. `duration` (in seconds) sets the pre-synthesis audio-token budget; post-processing can change the final WAV duration. `speed` controls the speaking rate and is ignored when `duration` is set.
 
 ### FlashInfer Acceleration
 
@@ -402,6 +402,8 @@ You can also scan the QR code to join our wechat group or follow our wechat offi
 
 OmniVoice is supported by a growing ecosystem of community projects.
 Explore them in [Community Projects](docs/community-projects.md).
+
+Silence-postprocessing fixes and production validation by [Thomas Vanini](https://linktr.ee/ThomasVanini) for the GTA V Enhanced PT-BR Dubbing Project, developed with [OpenAI Codex](https://developers.openai.com/).
 
 ---
 

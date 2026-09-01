@@ -1,0 +1,46 @@
+name: Robust long-form tests
+
+on:
+  pull_request:
+    paths:
+      - "omnivoice/robust_longform.py"
+      - "omnivoice/__init__.py"
+      - "omnivoice/models/omnivoice.py"
+      - "omnivoice/utils/audio.py"
+      - "tests/test_robust_longform.py"
+      - "tests/test_audio.py"
+      - "tests/test_cli_postprocessing.py"
+      - "notebooks/OmniVoice_Robust_LongForm_Colab.ipynb"
+      - ".github/workflows/robust-longform-tests.yml"
+  push:
+    branches:
+      - "fix/robust-longform-tts"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install package and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q omnivoice
+
+      - name: Validate Colab notebook JSON
+        run: python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
+
+      - name: Run robust long-form tests
+        run: pytest -q tests/test_robust_longform.py
