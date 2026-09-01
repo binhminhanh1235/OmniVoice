@@ -6,8 +6,9 @@
 """Simple Project Studio UI for long-form narration.
 
 The UI is deliberately thin. Persistent project parsing/generation lives in
-``omnivoice.project`` and reusable voice prompts live in
-``omnivoice.voice_library``. This keeps the same workflow usable from Colab,
+``omnivoice.project``; reusable voice prompts live in
+``omnivoice.voice_library``; style-aware prompt selection lives in
+``omnivoice.style_bank``. This keeps the same workflow usable from Colab,
 Python, CLI, or a future web application.
 """
 
@@ -25,6 +26,7 @@ import torch
 from omnivoice import OmniVoice, OmniVoiceGenerationConfig
 from omnivoice.project import OmniVoiceProject, parse_project_script
 from omnivoice.robust_longform import RobustLongFormConfig
+from omnivoice.style_bank import StyleBankProjectRunner
 from omnivoice.utils.common import get_best_device
 from omnivoice.voice_library import VoiceLibrary
 
@@ -258,7 +260,7 @@ class ProjectStudioController:
         project_path: str | Path,
         *,
         voice_name: str,
-        voice_variant: str = "DEFAULT",
+        voice_variant: str = "AUTO",
         language: Optional[str] = "en",
         section_ids: Optional[Iterable[str]] = None,
         resume: bool = True,
@@ -267,16 +269,21 @@ class ProjectStudioController:
         if not voice_name:
             raise ValueError("Select a saved voice before generation")
         project = self.load_project(project_path)
-        prompt = self.voices.load_prompt(voice_name, voice_variant)
+        selected_variant = (voice_variant or "AUTO").upper()
         self.save_project_settings(
             project,
             voice_name=voice_name,
-            voice_variant=voice_variant,
+            voice_variant=selected_variant,
             language=language,
         )
-        project.generate(
+        runner = StyleBankProjectRunner(
             self.model,
-            voice_clone_prompt=prompt,
+            self.voices,
+            voice_name=voice_name,
+            preferred_variant=selected_variant,
+        )
+        runner.generate(
+            project,
             robust_config=self.robust_config(strict=strict),
             generation_config=self.generation_config(),
             section_ids=section_ids,
@@ -291,7 +298,7 @@ class ProjectStudioController:
         chunk_choice: str,
         *,
         voice_name: str,
-        voice_variant: str = "DEFAULT",
+        voice_variant: str = "AUTO",
         language: Optional[str] = "en",
         strict: bool = False,
     ) -> OmniVoiceProject:
@@ -351,18 +358,18 @@ def build_demo(model: Any, workspace: str | Path):
     def refresh_voices():
         names = controller.voices.voice_names()
         value = names[0] if names else None
-        variants = controller.voices.variants(value) if value else []
+        variants = controller.voices.variant_choices(value) if value else []
         return (
             gr.update(choices=names, value=value),
-            gr.update(choices=variants, value=(variants[0] if variants else None)),
+            gr.update(choices=variants, value=("AUTO" if variants else None)),
             f"Found {len(names)} saved voices.",
         )
 
     def voice_variants(name):
-        variants = controller.voices.variants(name) if name else []
+        variants = controller.voices.variant_choices(name) if name else []
         return gr.update(
             choices=variants,
-            value=("DEFAULT" if "DEFAULT" in variants else (variants[0] if variants else None)),
+            value=("AUTO" if variants else None),
         )
 
     def add_voice(name, variant, audio, ref_text, language):
@@ -376,10 +383,10 @@ def build_demo(model: Any, workspace: str | Path):
             language=language or None,
         )
         names = controller.voices.voice_names()
-        variants = controller.voices.variants(name)
+        variants = controller.voices.variant_choices(name)
         return (
             gr.update(choices=names, value=name),
-            gr.update(choices=variants, value=(variant or "DEFAULT").upper()),
+            gr.update(choices=variants, value="AUTO"),
             message,
         )
 
@@ -450,7 +457,7 @@ def build_demo(model: Any, workspace: str | Path):
             project = controller.generate(
                 path,
                 voice_name=voice,
-                voice_variant=variant or "DEFAULT",
+                voice_variant=variant or "AUTO",
                 language=language or None,
                 section_ids=_split_section_ids(sections),
                 resume=bool(resume),
@@ -477,7 +484,7 @@ def build_demo(model: Any, workspace: str | Path):
                 path,
                 chunk,
                 voice_name=voice,
-                voice_variant=variant or "DEFAULT",
+                voice_variant=variant or "AUTO",
                 language=language or None,
                 strict=bool(strict),
             )
@@ -513,15 +520,30 @@ def build_demo(model: Any, workspace: str | Path):
         except Exception as exc:
             return None, f"Merge error: {type(exc).__name__}: {exc}"
 
+    initial_voice_names = controller.voices.voice_names()
+    initial_voice = initial_voice_names[0] if initial_voice_names else None
+    initial_variants = (
+        controller.voices.variant_choices(initial_voice)
+        if initial_voice
+        else []
+    )
+
     with gr.Blocks(title="OmniVoice Project Studio") as demo:
         gr.Markdown(
             "# OmniVoice Project Studio\n"
             "Paste the full script, keep `[WARM]`, `[SOFT]`, `[EMPHASIZE]` as "
-            "directives, and generate/checkpoint each Sxx section independently."
+            "directives, and generate/checkpoint each Sxx section independently.\n\n"
+            "**Voice Style Bank:** choose `AUTO` to let each beat select a matching "
+            "saved voice variant. Example: `[WARM]` uses `WARM` when available, "
+            "then falls back safely to `DEFAULT`."
         )
         project_state = gr.State("")
 
         with gr.Tab("1. Voice Library"):
+            gr.Markdown(
+                "Save the same narrator more than once with variants such as "
+                "`DEFAULT`, `WARM`, `SOFT`, or `EMPHASIZE`."
+            )
             with gr.Row():
                 voice_name = gr.Textbox(label="Voice name", placeholder="Warm American Male")
                 voice_variant_new = gr.Textbox(label="Variant", value="DEFAULT")
@@ -531,7 +553,7 @@ def build_demo(model: Any, workspace: str | Path):
                 label="Exact reference transcript (recommended)",
                 lines=3,
             )
-            add_voice_button = gr.Button("Save Voice", variant="primary")
+            add_voice_button = gr.Button("Save Voice / Variant", variant="primary")
             refresh_voice_button = gr.Button("Refresh Voice Library")
             voice_message = gr.Markdown()
 
@@ -560,13 +582,19 @@ def build_demo(model: Any, workspace: str | Path):
             with gr.Row():
                 saved_voice = gr.Dropdown(
                     label="Voice",
-                    choices=controller.voices.voice_names(),
+                    choices=initial_voice_names,
+                    value=initial_voice,
                 )
-                saved_variant = gr.Dropdown(label="Voice variant", choices=[])
+                saved_variant = gr.Dropdown(
+                    label="Voice variant",
+                    info="AUTO follows [WARM]/[SOFT]/... tags; a concrete variant locks the project.",
+                    choices=initial_variants,
+                    value=("AUTO" if initial_variants else None),
+                )
                 language = gr.Textbox(label="Language", value="en")
             sections = gr.Textbox(
                 label="Sections (optional)",
-                placeholder="S03,S07,S10 — empty means all",
+                placeholder="S03,S07,S10 - empty means all",
             )
             with gr.Row():
                 resume = gr.Checkbox(label="Resume / skip verified chunks", value=True)

@@ -42,7 +42,17 @@ from omnivoice.robust_longform import (
     RobustLongFormResult,
     generate_robust_longform,
 )
-from omnivoice.voice_library import VoiceEntry, VoiceLibrary, VoiceVariant
+from omnivoice.style_bank import (
+    StyleBankProjectRunner,
+    generate_project_with_style_bank,
+)
+from omnivoice.voice_library import (
+    STYLE_VARIANT_FALLBACKS,
+    VoiceEntry,
+    VoiceLibrary,
+    VoicePromptResolution,
+    VoiceVariant,
+)
 
 __all__ = [
     "OmniVoice",
@@ -65,4 +75,8 @@ __all__ = [
     "VoiceLibrary",
     "VoiceEntry",
     "VoiceVariant",
+    "VoicePromptResolution",
+    "STYLE_VARIANT_FALLBACKS",
+    "StyleBankProjectRunner",
+    "generate_project_with_style_bank",
 ]
