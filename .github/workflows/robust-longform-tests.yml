@@ -3,6 +3,7 @@ name: Robust long-form and project tests
 on:
   pull_request:
     paths:
+      - "omnivoice/adaptive_quality.py"
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
       - "omnivoice/preview.py"
@@ -20,6 +21,9 @@ on:
       - "docs/project-studio-roadmap.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
+      - "docs/live-section-status.md"
+      - "docs/adaptive-retry-pacing.md"
+      - "tests/test_adaptive_quality.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
       - "tests/test_preview.py"
@@ -42,6 +46,7 @@ on:
       - "feat/project-studio-p0"
       - "feat/project-studio-p1-style-bank"
       - "feat/project-studio-p1-preview"
+      - "feat/adaptive-retry-pacing"
 
 jobs:
   test:
@@ -74,6 +79,7 @@ jobs:
       - name: Run robust long-form and project tests
         run: |
           pytest -q \
+            tests/test_adaptive_quality.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
             tests/test_preview.py \
