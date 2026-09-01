@@ -5,6 +5,7 @@ on:
     paths:
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
+      - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
       - "omnivoice/style_bank.py"
       - "omnivoice/cli/demo_robust.py"
@@ -15,8 +16,10 @@ on:
       - "pyproject.toml"
       - "docs/project-studio.md"
       - "docs/project-studio-roadmap.md"
+      - "docs/voice-style-bank.md"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
+      - "tests/test_preview.py"
       - "tests/test_voice_library.py"
       - "tests/test_style_bank.py"
       - "tests/test_project_studio.py"
@@ -32,6 +35,7 @@ on:
       - "fix/gradio-robust-longform"
       - "feat/project-studio-p0"
       - "feat/project-studio-p1-style-bank"
+      - "feat/project-studio-p1-preview"
 
 jobs:
   test:
@@ -66,6 +70,7 @@ jobs:
           pytest -q \
             tests/test_robust_longform.py \
             tests/test_project.py \
+            tests/test_preview.py \
             tests/test_voice_library.py \
             tests/test_style_bank.py \
             tests/test_project_studio.py \
