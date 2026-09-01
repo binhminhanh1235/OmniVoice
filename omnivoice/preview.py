@@ -147,6 +147,15 @@ class ProjectPreviewGenerator:
             fade_duration=0.0,
         )
 
+        # Preview honors the same explicit verification switch as project render.
+        # Synthetic/unit-test previews with verify_with_asr=False must not be
+        # rejected by a separate pacing-only gate.
+        effective_quality = (
+            self.style_bank.quality_config
+            if base_robust.verify_with_asr
+            else replace(self.style_bank.quality_config, pacing_guard=False)
+        )
+
         allowed = {item.lower() for item in labels} if labels is not None else None
         targets = [
             target
@@ -183,6 +192,7 @@ class ProjectPreviewGenerator:
             generated = AdaptiveRobustLongFormGenerator(
                 self.model,
                 style_robust,
+                effective_quality,
             ).generate(
                 target.text,
                 generation_config=base_generation,
