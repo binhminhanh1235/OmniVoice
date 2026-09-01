@@ -66,7 +66,8 @@ lora = [
 [project.scripts]
 omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
-omnivoice-demo = "omnivoice.cli.demo:main"
+omnivoice-demo = "omnivoice.cli.demo_robust:main"
+omnivoice-demo-legacy = "omnivoice.cli.demo:main"
 omnivoice-merge-lora = "omnivoice.cli.merge_lora:main"
 
 [project.urls]

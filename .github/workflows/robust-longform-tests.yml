@@ -4,10 +4,13 @@ on:
   pull_request:
     paths:
       - "omnivoice/robust_longform.py"
+      - "omnivoice/cli/demo_robust.py"
       - "omnivoice/__init__.py"
       - "omnivoice/models/omnivoice.py"
       - "omnivoice/utils/audio.py"
+      - "pyproject.toml"
       - "tests/test_robust_longform.py"
+      - "tests/test_demo_robust.py"
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
       - "notebooks/OmniVoice_Robust_LongForm_Colab.ipynb"
@@ -15,6 +18,7 @@ on:
   push:
     branches:
       - "fix/robust-longform-tts"
+      - "fix/gradio-robust-longform"
 
 jobs:
   test:
@@ -43,4 +47,7 @@ jobs:
         run: python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
 
       - name: Run robust long-form tests
-        run: pytest -q tests/test_robust_longform.py
+        run: |
+          pytest -q \
+            tests/test_robust_longform.py \
+            tests/test_demo_robust.py
