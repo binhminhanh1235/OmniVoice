@@ -25,6 +25,17 @@ from omnivoice.models.omnivoice import (
     OmniVoiceGenerationConfig,
     VoiceClonePrompt,
 )
+from omnivoice.project import (
+    DEFAULT_STYLE_PROFILES,
+    OmniVoiceProject,
+    OmniVoiceStyleResolver,
+    ProjectBeat,
+    ProjectChunk,
+    ProjectManifest,
+    ProjectSection,
+    StyleProfile,
+    parse_project_script,
+)
 from omnivoice.robust_longform import (
     RobustLongFormConfig,
     RobustLongFormGenerator,
@@ -41,4 +52,13 @@ __all__ = [
     "RobustLongFormGenerator",
     "RobustLongFormResult",
     "generate_robust_longform",
+    "OmniVoiceProject",
+    "ProjectManifest",
+    "ProjectSection",
+    "ProjectBeat",
+    "ProjectChunk",
+    "StyleProfile",
+    "OmniVoiceStyleResolver",
+    "DEFAULT_STYLE_PROFILES",
+    "parse_project_script",
 ]
