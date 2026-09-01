@@ -17,6 +17,7 @@ on:
       - "omnivoice/cli/project_studio_live.py"
       - "omnivoice/cli/project_studio_text.py"
       - "omnivoice/cli/project_studio_resume.py"
+      - "omnivoice/cli/project_studio_text_resume.py"
       - "omnivoice/cli/text_doctor_ui.py"
       - "omnivoice/__init__.py"
       - "omnivoice/models/omnivoice.py"
