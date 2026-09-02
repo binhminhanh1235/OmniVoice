@@ -14,10 +14,12 @@ from pathlib import Path
 import torch
 
 from omnivoice import OmniVoice
+from omnivoice.cli import project_studio_quality as quality_module
 from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
+from omnivoice.cli.generation_control_ui import build_generation_control_demo
 from omnivoice.cli.project_queue_ui import build_project_queue_demo
+from omnivoice.cli.project_studio_pause import PauseAwareQualityPresetProjectStudioController
 from omnivoice.cli.project_studio_quality import (
-    QualityPresetProjectStudioController,
     build_hardware_quality_demo,
     build_quality_project_demo,
     install_quality_controller,
@@ -35,30 +37,52 @@ logger = logging.getLogger(__name__)
 def build_demo(model, workspace: str | Path):
     import gradio as gr
 
+    # Existing Studio builders resolve their controller class from
+    # project_studio_quality at runtime. Replace that one integration seam with
+    # the pause-aware subclass so Generate/Resume, Queue, History and export all
+    # keep the same quality/resume behavior while respecting project pause state.
+    quality_module.QualityPresetProjectStudioController = (
+        PauseAwareQualityPresetProjectStudioController
+    )
     install_quality_controller()
+
     text_doctor = build_text_doctor_demo()
     voice_doctor = build_voice_doctor_demo(model, workspace)
     studio = build_quality_project_demo(model, workspace)
+    generation_control = build_generation_control_demo(
+        model,
+        workspace,
+        controller_cls=PauseAwareQualityPresetProjectStudioController,
+    )
     project_queue = build_project_queue_demo(
         model,
         workspace,
-        controller_cls=QualityPresetProjectStudioController,
+        controller_cls=PauseAwareQualityPresetProjectStudioController,
     )
     hardware = build_hardware_quality_demo(model, workspace)
     downloads = build_section_export_demo(
         model,
         workspace,
-        controller_cls=QualityPresetProjectStudioController,
+        controller_cls=PauseAwareQualityPresetProjectStudioController,
     )
     demo = gr.TabbedInterface(
-        [text_doctor, voice_doctor, studio, project_queue, hardware, downloads],
+        [
+            text_doctor,
+            voice_doctor,
+            studio,
+            generation_control,
+            project_queue,
+            hardware,
+            downloads,
+        ],
         [
             "1. Text Doctor",
             "2. Voice Doctor",
             "3. Project Studio",
-            "4. Project Queue",
-            "5. Hardware & Quality",
-            "6. Section MP3 Downloads",
+            "4. Pause / Resume",
+            "5. Project Queue",
+            "6. Hardware & Quality",
+            "7. Section MP3 Downloads",
         ],
         title="OmniVoice Project Studio",
     )
