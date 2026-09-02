@@ -3,14 +3,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Persistent reusable voice prompts for OmniVoice Studio.
-
-A voice is stored once and can then be reused across projects without
-re-transcribing or re-encoding the reference audio on every Colab session.
-The storage format intentionally keeps variants generic (DEFAULT, WARM, SOFT,
-etc.) so a later Style Bank can select a matching prompt without changing the
-project script format.
-"""
+"""Persistent reusable voice prompts and style variants for OmniVoice Studio."""
 
 from __future__ import annotations
 
@@ -25,6 +18,19 @@ from typing import Any, Optional
 from omnivoice.models.omnivoice import VoiceClonePrompt
 
 _VOICE_FORMAT_VERSION = 1
+
+# Generic narration intents map to reference variants, not unsupported raw
+# OmniVoice instruct strings. Order matters: first existing candidate wins.
+STYLE_VARIANT_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "DEFAULT": ("DEFAULT",),
+    "WARM": ("WARM", "DEFAULT"),
+    "SOFT": ("SOFT", "DEFAULT"),
+    "EMPHASIZE": ("EMPHASIZE", "WARM", "DEFAULT"),
+    "PRAYER": ("PRAYER", "SOFT", "DEFAULT"),
+    "WHISPER": ("WHISPER", "SOFT", "DEFAULT"),
+    "LOW_PITCH": ("LOW_PITCH", "DEFAULT"),
+    "HIGH_PITCH": ("HIGH_PITCH", "DEFAULT"),
+}
 
 
 def _utc_now() -> str:
@@ -79,6 +85,15 @@ class VoiceEntry:
         if not self.variants:
             raise ValueError(f"Voice {self.name!r} has no variants")
         return sorted(self.variants)[0]
+
+
+@dataclass(frozen=True)
+class VoicePromptResolution:
+    prompt: VoiceClonePrompt
+    voice_name: str
+    requested_style: str
+    variant: str
+    used_fallback: bool
 
 
 class VoiceLibrary:
@@ -190,6 +205,7 @@ class VoiceLibrary:
             reference_file = str(destination.relative_to(voice_dir))
 
         now = _utc_now()
+        previous = entry.variants.get(variant_key)
         entry.name = name.strip()
         entry.updated_at = now
         entry.variants[variant_key] = VoiceVariant(
@@ -198,11 +214,7 @@ class VoiceLibrary:
             ref_text=prompt.ref_text,
             language=language,
             reference_file=reference_file,
-            created_at=(
-                entry.variants[variant_key].created_at
-                if variant_key in entry.variants
-                else now
-            ),
+            created_at=previous.created_at if previous else now,
             updated_at=now,
         )
         _write_json(manifest_path, asdict(entry))
@@ -253,8 +265,70 @@ class VoiceLibrary:
         prompt_path = voice_dir / entry.variants[variant_key].prompt_file
         return VoiceClonePrompt.load(str(prompt_path))
 
+    def resolve_variant(
+        self,
+        name_or_slug: str,
+        *,
+        style: str = "DEFAULT",
+        preferred_variant: str = "AUTO",
+    ) -> tuple[str, bool]:
+        """Choose a style reference with deterministic fallback.
+
+        A concrete ``preferred_variant`` locks the whole project to that
+        variant. ``AUTO`` lets the script style choose a matching reference.
+        """
+
+        entry = self.get(name_or_slug)
+        preferred = _normalise_variant(preferred_variant)
+        if preferred != "AUTO":
+            if preferred not in entry.variants:
+                available = ", ".join(sorted(entry.variants))
+                raise KeyError(
+                    f"Voice {entry.name!r} has no variant {preferred!r}. "
+                    f"Available: {available}"
+                )
+            return preferred, False
+
+        style_key = _normalise_variant(style)
+        candidates = STYLE_VARIANT_FALLBACKS.get(
+            style_key,
+            (style_key, "DEFAULT"),
+        )
+        for index, candidate in enumerate(candidates):
+            if candidate in entry.variants:
+                return candidate, index > 0
+
+        # A library created before DEFAULT became the convention may contain
+        # only one custom variant. Keep it usable rather than failing.
+        return entry.default_variant, True
+
+    def resolve_prompt(
+        self,
+        name_or_slug: str,
+        *,
+        style: str = "DEFAULT",
+        preferred_variant: str = "AUTO",
+    ) -> VoicePromptResolution:
+        entry = self.get(name_or_slug)
+        variant, used_fallback = self.resolve_variant(
+            name_or_slug,
+            style=style,
+            preferred_variant=preferred_variant,
+        )
+        return VoicePromptResolution(
+            prompt=self.load_prompt(name_or_slug, variant),
+            voice_name=entry.name,
+            requested_style=_normalise_variant(style),
+            variant=variant,
+            used_fallback=used_fallback,
+        )
+
     def variants(self, name_or_slug: str) -> list[str]:
         return sorted(self.get(name_or_slug).variants)
+
+    def variant_choices(self, name_or_slug: str, *, include_auto: bool = True) -> list[str]:
+        variants = self.variants(name_or_slug)
+        return (["AUTO"] + variants) if include_auto else variants
 
     def delete_voice(self, name_or_slug: str) -> None:
         entry = self.get(name_or_slug)

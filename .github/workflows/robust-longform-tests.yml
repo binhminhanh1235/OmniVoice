@@ -3,31 +3,125 @@ name: Robust long-form and project tests
 on:
   pull_request:
     paths:
+      - "omnivoice/adaptive_quality.py"
+      - "omnivoice/hardware_quality.py"
+      - "omnivoice/runtime_workspace.py"
+      - "omnivoice/services/**"
+      - "omnivoice/server/**"
+      - "omnivoice/mcp_server.py"
+      - "omnivoice/tunnel.py"
+      - "omnivoice/text_doctor.py"
+      - "omnivoice/voice_doctor.py"
+      - "omnivoice/voice_stability.py"
+      - "omnivoice/reference_segment.py"
+      - "omnivoice/project_queue.py"
+      - "omnivoice/project_status.py"
+      - "omnivoice/section_status.py"
+      - "omnivoice/section_history.py"
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
+      - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
+      - "omnivoice/style_bank.py"
       - "omnivoice/cli/demo_robust.py"
       - "omnivoice/cli/project_studio.py"
+      - "omnivoice/cli/project_studio_plus.py"
+      - "omnivoice/cli/project_studio_live.py"
+      - "omnivoice/cli/project_studio_text.py"
+      - "omnivoice/cli/project_studio_resume.py"
+      - "omnivoice/cli/project_studio_quality.py"
+      - "omnivoice/cli/project_studio_text_resume.py"
+      - "omnivoice/cli/project_studio_voice_doctor.py"
+      - "omnivoice/cli/studio_server.py"
+      - "omnivoice/cli/project_queue_ui.py"
+      - "omnivoice/cli/section_history_ui.py"
+      - "omnivoice/cli/text_doctor_ui.py"
+      - "omnivoice/cli/voice_doctor_ui.py"
       - "omnivoice/__init__.py"
       - "omnivoice/models/omnivoice.py"
       - "omnivoice/utils/audio.py"
       - "pyproject.toml"
       - "docs/project-studio.md"
+      - "docs/project-studio-roadmap.md"
+      - "docs/project-queue.md"
+      - "docs/hardware-quality-presets.md"
+      - "docs/kaggle-local-workspace.md"
+      - "docs/ai-native-foundation.md"
+      - "docs/ai-native-sse.md"
+      - "docs/ai-native-mcp.md"
+      - "docs/stable-tunnel.md"
+      - "docs/voice-style-bank.md"
+      - "docs/preview-before-render.md"
+      - "docs/live-section-status.md"
+      - "docs/adaptive-retry-pacing.md"
+      - "docs/text-doctor.md"
+      - "docs/section-status-resume.md"
+      - "docs/section-version-history.md"
+      - "docs/voice-doctor.md"
+      - "docs/voice-stability-score.md"
+      - "docs/auto-reference-segment.md"
+      - "tests/test_adaptive_quality.py"
+      - "tests/test_hardware_quality.py"
+      - "tests/test_runtime_workspace.py"
+      - "tests/test_studio_service.py"
+      - "tests/test_studio_server.py"
+      - "tests/test_job_manager.py"
+      - "tests/test_studio_commands.py"
+      - "tests/test_mcp_server.py"
+      - "tests/test_tunnel.py"
+      - "tests/test_project_studio_quality.py"
+      - "tests/test_text_doctor.py"
+      - "tests/test_text_doctor_ui.py"
+      - "tests/test_voice_doctor.py"
+      - "tests/test_voice_doctor_ui.py"
+      - "tests/test_voice_stability.py"
+      - "tests/test_reference_segment.py"
+      - "tests/test_project_queue.py"
+      - "tests/test_project_queue_ui.py"
+      - "tests/test_project_status.py"
+      - "tests/test_section_status.py"
+      - "tests/test_section_resume_controller.py"
+      - "tests/test_section_history.py"
+      - "tests/test_section_history_ui.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
+      - "tests/test_preview.py"
       - "tests/test_voice_library.py"
+      - "tests/test_style_bank.py"
       - "tests/test_project_studio.py"
+      - "tests/test_project_studio_preview_ui.py"
+      - "tests/test_project_studio_live_ui.py"
       - "tests/test_demo_robust.py"
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
       - "notebooks/OmniVoice_Robust_LongForm_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
       - ".github/workflows/robust-longform-tests.yml"
   push:
     branches:
       - "fix/robust-longform-tts"
       - "fix/gradio-robust-longform"
+      - "fix/project-studio-generate-diagnostics"
       - "feat/project-studio-p0"
+      - "feat/project-studio-p1-style-bank"
+      - "feat/project-studio-p1-preview"
+      - "feat/adaptive-retry-pacing"
+      - "feat/text-doctor"
+      - "feat/section-status-resume"
+      - "feat/voice-doctor"
+      - "feat/voice-stability-score"
+      - "feat/section-version-history"
+      - "feat/auto-reference-segment"
+      - "feat/project-queue"
+      - "feat/hardware-quality-presets-v2"
+      - "feat/kaggle-local-workspace"
+      - "feat/ai-native-foundation-v1"
+      - "feat/ai-native-jobs-v1"
+      - "feat/ai-native-write-api-v1"
+      - "feat/ai-native-sse-v1"
+      - "feat/ai-native-mcp-v1"
+      - "feat/stable-tunnel-v1"
 
 jobs:
   test:
@@ -52,16 +146,44 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q omnivoice
 
-      - name: Validate Colab notebook JSON
+      - name: Validate notebook JSON
         run: |
           python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
           python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
 
       - name: Run robust long-form and project tests
         run: |
           pytest -q \
+            tests/test_adaptive_quality.py \
+            tests/test_hardware_quality.py \
+            tests/test_runtime_workspace.py \
+            tests/test_studio_service.py \
+            tests/test_studio_server.py \
+            tests/test_job_manager.py \
+            tests/test_studio_commands.py \
+            tests/test_mcp_server.py \
+            tests/test_tunnel.py \
+            tests/test_project_studio_quality.py \
+            tests/test_text_doctor.py \
+            tests/test_text_doctor_ui.py \
+            tests/test_voice_doctor.py \
+            tests/test_voice_doctor_ui.py \
+            tests/test_voice_stability.py \
+            tests/test_reference_segment.py \
+            tests/test_project_queue.py \
+            tests/test_project_queue_ui.py \
+            tests/test_project_status.py \
+            tests/test_section_status.py \
+            tests/test_section_resume_controller.py \
+            tests/test_section_history.py \
+            tests/test_section_history_ui.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
+            tests/test_preview.py \
             tests/test_voice_library.py \
+            tests/test_style_bank.py \
             tests/test_project_studio.py \
+            tests/test_project_studio_preview_ui.py \
+            tests/test_project_studio_live_ui.py \
             tests/test_demo_robust.py

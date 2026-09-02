@@ -21,11 +21,8 @@ keywords = [
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
-    "Intended Audience :: Developers",
-
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
-
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
@@ -36,6 +33,9 @@ dependencies = [
     "accelerate",
     "pydub",
     "gradio",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "mcp>=2,<3",
     "tensorboardX",
     "webdataset",
     "numpy",
@@ -68,7 +68,8 @@ omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
 omnivoice-demo = "omnivoice.cli.demo_robust:main"
 omnivoice-demo-legacy = "omnivoice.cli.demo:main"
-omnivoice-project-studio = "omnivoice.cli.project_studio:main"
+omnivoice-project-studio = "omnivoice.cli.project_studio_voice_doctor:main"
+omnivoice-studio = "omnivoice.cli.studio_server:main"
 omnivoice-merge-lora = "omnivoice.cli.merge_lora:main"
 
 [project.urls]
@@ -89,10 +90,8 @@ torchaudio = [
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
-# Use PyTorch built for NVIDIA Toolkit version 12.8.
-# Available versions: https://pytorch.org/get-started/locally/
+# Install PyTorch built for NVIDIA Toolkit version 12.8.
 url = "https://download.pytorch.org/whl/cu128"
-# Only use this index when explicitly requested as `dependencies` above.
 explicit = true
 
 [tool.uv]

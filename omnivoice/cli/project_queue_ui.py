@@ -1,0 +1,628 @@
+#!/usr/bin/env python3
+# Copyright 2026 OmniVoice contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+"""Gradio UI for the persistent multi-project render queue."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Iterable
+
+from omnivoice.project_queue import ProjectQueueRunner, ProjectQueueStore, queue_rows
+from omnivoice.project_status import (
+    DEFAULT_QUEUE_PROJECT_STATUSES,
+    PROJECT_STATUSES,
+    ProjectStatusSummary,
+    filter_project_statuses,
+    project_status_rows,
+    scan_project_statuses,
+)
+
+QUEUE_HEADERS = [
+    "#",
+    "Project",
+    "Queue status",
+    "Sections",
+    "Current section",
+    "Voice",
+    "Variant",
+    "Language",
+    "Auto merge",
+    "Message / error",
+    "Queue ID",
+]
+
+PROJECT_BROWSER_HEADERS = [
+    "Project status",
+    "Project",
+    "Sections",
+    "Active section",
+    "Updated",
+    "Path",
+]
+
+
+def _item_choices(manifest) -> list[str]:
+    return [
+        f"{item.id} | {item.project_title} | {item.status.upper()}"
+        for item in manifest.items
+    ]
+
+
+def _preferred_item_choice(manifest) -> str | None:
+    if not manifest.items:
+        return None
+    preferred = next(
+        (item for item in manifest.items if item.status == "running"),
+        None,
+    )
+    if preferred is None:
+        preferred = next(
+            (
+                item
+                for item in manifest.items
+                if item.status in {"pending", "paused", "failed", "needs_review"}
+            ),
+            manifest.items[0],
+        )
+    return f"{preferred.id} | {preferred.project_title} | {preferred.status.upper()}"
+
+
+def _choice_id(value: str | None) -> str:
+    if not value:
+        raise ValueError("Select a queue item first")
+    return value.split(" | ", 1)[0].strip()
+
+
+def _normalize_status_filter(values: Iterable[str] | None) -> list[str]:
+    selected = [str(value).upper() for value in (values or []) if str(value).strip()]
+    return selected or list(DEFAULT_QUEUE_PROJECT_STATUSES)
+
+
+def _project_choices(summaries: Iterable[ProjectStatusSummary]):
+    return [(summary.dropdown_label, summary.path) for summary in summaries]
+
+
+def _status_note(summaries: Iterable[ProjectStatusSummary], selected_statuses: Iterable[str]) -> str:
+    items = list(summaries)
+    counts = {status: 0 for status in PROJECT_STATUSES}
+    for item in items:
+        counts[item.status] = counts.get(item.status, 0) + 1
+    selected = _normalize_status_filter(selected_statuses)
+    parts = [f"{status}={counts.get(status, 0)}" for status in selected]
+    return (
+        f"Showing {len(items)} eligible project(s): "
+        + ", ".join(parts)
+        + ". Projects already in the queue are hidden. DONE is hidden unless explicitly selected."
+    )
+
+
+def build_project_queue_demo(
+    model: Any,
+    workspace: str | Path,
+    *,
+    controller_cls: type,
+):
+    import gradio as gr
+
+    controller = controller_cls(model, workspace)
+    store = ProjectQueueStore(workspace)
+    # Recovery is intentionally performed once when the app starts. A normal
+    # Refresh must never rewrite a genuinely RUNNING item while generation is
+    # still active in this process.
+    store.recover_interrupted()
+    runner = ProjectQueueRunner(controller, store)
+
+    def project_defaults(project_path, voices=None):
+        names = list(voices if voices is not None else controller.voices.voice_names())
+        preferred_voice = names[0] if names else None
+        preferred_variant = None
+        language = "en"
+        title = None
+
+        if project_path:
+            project = controller.load_project(project_path)
+            title = project.manifest.title
+            settings = controller.load_project_settings(project)
+            saved_voice = settings.get("voice_name")
+            if saved_voice in names:
+                preferred_voice = saved_voice
+            language = settings.get("language") or "en"
+
+            variants = (
+                controller.voices.variant_choices(preferred_voice)
+                if preferred_voice
+                else []
+            )
+            saved_variant = (settings.get("voice_variant") or "AUTO").upper()
+            if saved_variant in variants:
+                preferred_variant = saved_variant
+            elif "AUTO" in variants:
+                preferred_variant = "AUTO"
+            elif variants:
+                preferred_variant = variants[0]
+            return preferred_voice, variants, preferred_variant, language, title
+
+        variants = (
+            controller.voices.variant_choices(preferred_voice)
+            if preferred_voice
+            else []
+        )
+        preferred_variant = "AUTO" if "AUTO" in variants else (variants[0] if variants else None)
+        return preferred_voice, variants, preferred_variant, language, title
+
+    def eligible_projects(status_filter):
+        selected = _normalize_status_filter(status_filter)
+        manifest = store.load()
+        # Any project already represented in the queue disappears from the
+        # browser. This keeps a large workspace focused on work that can still
+        # be added instead of presenting duplicate queue candidates.
+        queued_paths = [item.project_path for item in manifest.items]
+        summaries = scan_project_statuses(controller.projects_root)
+        return filter_project_statuses(
+            summaries,
+            selected,
+            exclude_paths=queued_paths,
+        )
+
+    def browser_state(status_filter, voices=None):
+        selected = _normalize_status_filter(status_filter)
+        summaries = eligible_projects(selected)
+        choices = _project_choices(summaries)
+        project_value = summaries[0].path if summaries else None
+        names = list(voices if voices is not None else controller.voices.voice_names())
+        voice_value, variants, variant_value, language_value, title = project_defaults(
+            project_value,
+            names,
+        )
+        return (
+            summaries,
+            choices,
+            project_value,
+            names,
+            voice_value,
+            variants,
+            variant_value,
+            language_value,
+            title,
+            _status_note(summaries, selected),
+        )
+
+    def queue_updates(message: str = ""):
+        manifest = store.load()
+        choices = _item_choices(manifest)
+        return (
+            queue_rows(manifest),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+            message or f"Queue has {len(manifest.items)} project(s).",
+        )
+
+    def refresh_all(status_filter):
+        (
+            summaries,
+            project_choices,
+            project_value,
+            voices,
+            voice_value,
+            variants,
+            variant_value,
+            language_value,
+            title,
+            filter_note,
+        ) = browser_state(status_filter)
+        manifest = store.load()
+        queue_choices = _item_choices(manifest)
+        note = (f"Loaded saved settings for {title!r}. " if title else "") + filter_note
+        return (
+            gr.update(choices=project_choices, value=project_value),
+            project_status_rows(summaries),
+            gr.update(choices=voices, value=voice_value),
+            gr.update(choices=variants, value=variant_value),
+            language_value,
+            queue_rows(manifest),
+            gr.update(choices=queue_choices, value=_preferred_item_choice(manifest)),
+            note,
+        )
+
+    def project_settings(project_path):
+        if not project_path:
+            return gr.update(), gr.update(), "en", "Choose a project."
+        voices = controller.voices.voice_names()
+        voice_value, variants, variant_value, language_value, title = project_defaults(
+            project_path,
+            voices,
+        )
+        summary = next(
+            (
+                item
+                for item in scan_project_statuses(controller.projects_root)
+                if str(Path(item.path).resolve()) == str(Path(project_path).resolve())
+            ),
+            None,
+        )
+        suffix = (
+            f" Status: {summary.status} · {summary.progress} sections complete."
+            if summary
+            else ""
+        )
+        return (
+            gr.update(choices=voices, value=voice_value),
+            gr.update(choices=variants, value=variant_value),
+            language_value,
+            f"Loaded saved settings for {title!r}.{suffix}",
+        )
+
+    def voice_variants(voice_name):
+        variants = controller.voices.variant_choices(voice_name) if voice_name else []
+        return gr.update(
+            choices=variants,
+            value=("AUTO" if "AUTO" in variants else (variants[0] if variants else None)),
+        )
+
+    def refreshed_after_queue_change(status_filter, message):
+        (
+            summaries,
+            project_choices,
+            project_value,
+            voices,
+            voice_value,
+            variants,
+            variant_value,
+            language_value,
+            _title,
+            filter_note,
+        ) = browser_state(status_filter)
+        manifest = store.load()
+        queue_choices = _item_choices(manifest)
+        return (
+            gr.update(choices=project_choices, value=project_value),
+            project_status_rows(summaries),
+            gr.update(choices=voices, value=voice_value),
+            gr.update(choices=variants, value=variant_value),
+            language_value,
+            queue_rows(manifest),
+            gr.update(choices=queue_choices, value=_preferred_item_choice(manifest)),
+            f"{message}\n\n{filter_note}",
+        )
+
+    def enqueue(project_path, voice_name, variant, language, strict, auto_merge, status_filter):
+        if not project_path:
+            raise gr.Error("Choose a project first.")
+        try:
+            item = store.enqueue(
+                controller,
+                project_path,
+                voice_name=voice_name,
+                voice_variant=variant or "AUTO",
+                language=language or None,
+                strict=bool(strict),
+                auto_merge=bool(auto_merge),
+            )
+            return refreshed_after_queue_change(
+                status_filter,
+                f"✅ Added {item.project_title!r} to queue.",
+            )
+        except Exception as exc:
+            raise gr.Error(f"Could not add project: {type(exc).__name__}: {exc}")
+
+    def enqueue_filtered(status_filter, strict, auto_merge):
+        summaries = eligible_projects(status_filter)
+        if not summaries:
+            raise gr.Error("No eligible projects match the selected statuses.")
+        added = []
+        skipped = []
+        for summary in summaries:
+            try:
+                item = store.enqueue(
+                    controller,
+                    summary.path,
+                    # Batch mode deliberately uses each project's saved
+                    # Studio settings rather than one global voice override.
+                    voice_name=None,
+                    voice_variant=None,
+                    language=None,
+                    strict=bool(strict),
+                    auto_merge=bool(auto_merge),
+                )
+                added.append(item.project_title)
+            except Exception as exc:
+                skipped.append(f"{summary.title}: {type(exc).__name__}: {exc}")
+        message = f"✅ Added {len(added)} filtered project(s) to queue."
+        if skipped:
+            message += "\n\nSkipped:\n- " + "\n- ".join(skipped[:12])
+            if len(skipped) > 12:
+                message += f"\n- ... and {len(skipped) - 12} more"
+        return refreshed_after_queue_change(status_filter, message)
+
+    def remove_item(choice, status_filter):
+        try:
+            store.remove(_choice_id(choice))
+            return refreshed_after_queue_change(status_filter, "Removed queue item.")
+        except Exception as exc:
+            raise gr.Error(f"Remove failed: {type(exc).__name__}: {exc}")
+
+    def move_item(choice, delta):
+        try:
+            store.move(_choice_id(choice), int(delta))
+            return queue_updates("Queue order updated.")
+        except Exception as exc:
+            raise gr.Error(f"Move failed: {type(exc).__name__}: {exc}")
+
+    def requeue_item(choice):
+        try:
+            store.requeue(_choice_id(choice))
+            return queue_updates("Project marked pending again. Completed sections will still be skipped.")
+        except Exception as exc:
+            raise gr.Error(f"Requeue failed: {type(exc).__name__}: {exc}")
+
+    def clear_completed(status_filter):
+        store.clear_completed()
+        return refreshed_after_queue_change(
+            status_filter,
+            "Cleared completed queue items. Project files were not deleted.",
+        )
+
+    def request_pause():
+        store.request_pause()
+        return "⏸ Pause requested. Runner will stop before the next section."
+
+    def resume_flag():
+        store.resume_queue()
+        return "▶ Queue resumed. Click Run Queue to continue pending work."
+
+    def run_queue(continue_on_error):
+        store.resume_queue()
+        manifest = store.load()
+        choices = _item_choices(manifest)
+        yield (
+            queue_rows(manifest),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+            "▶ Queue started. Projects run top-to-bottom; each project resumes incomplete sections only.",
+        )
+        try:
+            for event in runner.run(continue_on_error=bool(continue_on_error)):
+                manifest = store.load()
+                choices = _item_choices(manifest)
+                where = f" · {event.current_section}" if event.current_section else ""
+                yield (
+                    queue_rows(manifest),
+                    gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+                    f"**{event.status.upper()}** · {event.project_title or 'Queue'}{where}\n\n{event.message}",
+                )
+        except Exception as exc:
+            manifest = store.load()
+            choices = _item_choices(manifest)
+            yield (
+                queue_rows(manifest),
+                gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+                f"❌ Queue runner error: {type(exc).__name__}: {exc}",
+            )
+            return
+
+        manifest = store.load()
+        choices = _item_choices(manifest)
+        pending = sum(item.status not in {"completed", "cancelled"} for item in manifest.items)
+        yield (
+            queue_rows(manifest),
+            gr.update(choices=choices, value=_preferred_item_choice(manifest)),
+            f"Queue pass finished. {pending} item(s) still need work/review.",
+        )
+
+    initial_filter = list(DEFAULT_QUEUE_PROJECT_STATUSES)
+    (
+        initial_summaries,
+        initial_project_choices,
+        initial_project,
+        initial_voices,
+        initial_voice,
+        initial_variants,
+        initial_variant,
+        initial_language,
+        initial_title,
+        initial_filter_note,
+    ) = browser_state(initial_filter)
+    initial_manifest = store.load()
+    initial_items = _item_choices(initial_manifest)
+
+    with gr.Blocks(title="Project Queue") as demo:
+        gr.Markdown(
+            "# Project Queue\n"
+            "Queue multiple narration projects and let Studio render them continuously. "
+            "Queue state is saved to `project-queue.json`; project render status is derived "
+            "from each project's `section-status.json`."
+        )
+
+        gr.Markdown("## Project Browser")
+        with gr.Row():
+            status_filter = gr.CheckboxGroup(
+                label="Project status filter",
+                choices=list(PROJECT_STATUSES),
+                value=initial_filter,
+                scale=3,
+            )
+            refresh = gr.Button("Refresh project status", scale=1)
+        project_browser = gr.Dataframe(
+            headers=PROJECT_BROWSER_HEADERS,
+            value=project_status_rows(initial_summaries),
+            interactive=False,
+            wrap=True,
+        )
+        with gr.Row():
+            project = gr.Dropdown(
+                label="Eligible project",
+                choices=initial_project_choices,
+                value=initial_project,
+                scale=3,
+            )
+            add_filtered_button = gr.Button(
+                "Add ALL filtered projects using saved settings",
+                scale=2,
+            )
+
+        gr.Markdown("### Selected project settings")
+        with gr.Row():
+            voice = gr.Dropdown(label="Voice", choices=initial_voices, value=initial_voice)
+            variant = gr.Dropdown(
+                label="Variant",
+                choices=initial_variants,
+                value=initial_variant,
+            )
+            language = gr.Textbox(label="Language", value=initial_language)
+        with gr.Row():
+            strict = gr.Checkbox(label="Strict verification", value=False)
+            auto_merge = gr.Checkbox(label="Auto-merge full.wav when project completes", value=True)
+            add_button = gr.Button("Add Selected Project", variant="primary")
+        add_status = gr.Markdown(
+            (f"Loaded saved settings for {initial_title!r}. " if initial_title else "")
+            + initial_filter_note
+        )
+
+        gr.Markdown("## Queue")
+        queue_table = gr.Dataframe(
+            headers=QUEUE_HEADERS,
+            value=queue_rows(initial_manifest),
+            interactive=False,
+            wrap=True,
+        )
+        with gr.Row():
+            queue_item = gr.Dropdown(
+                label="Queue item",
+                choices=initial_items,
+                value=_preferred_item_choice(initial_manifest),
+                scale=3,
+            )
+            up_button = gr.Button("↑ Up")
+            down_button = gr.Button("↓ Down")
+            remove_button = gr.Button("Remove")
+            requeue_button = gr.Button("Requeue")
+            clear_button = gr.Button("Clear completed")
+
+        gr.Markdown("## Continuous Render")
+        with gr.Row():
+            continue_on_error = gr.Checkbox(
+                label="Continue with next project if one project fails",
+                value=True,
+            )
+            run_button = gr.Button("Run Queue", variant="primary")
+            pause_button = gr.Button("Pause after current section")
+            resume_button = gr.Button("Resume queue flag")
+        run_status = gr.Markdown(
+            "Idle. Queue order and progress persist across Colab/runtime restarts."
+        )
+
+        refresh.click(
+            refresh_all,
+            inputs=status_filter,
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        status_filter.change(
+            refresh_all,
+            inputs=status_filter,
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        project.change(
+            project_settings,
+            inputs=project,
+            outputs=[voice, variant, language, add_status],
+        )
+        voice.change(voice_variants, inputs=voice, outputs=variant)
+        add_button.click(
+            enqueue,
+            inputs=[project, voice, variant, language, strict, auto_merge, status_filter],
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        add_filtered_button.click(
+            enqueue_filtered,
+            inputs=[status_filter, strict, auto_merge],
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        remove_button.click(
+            remove_item,
+            inputs=[queue_item, status_filter],
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        up_button.click(
+            lambda choice: move_item(choice, -1),
+            inputs=queue_item,
+            outputs=[queue_table, queue_item, add_status],
+        )
+        down_button.click(
+            lambda choice: move_item(choice, 1),
+            inputs=queue_item,
+            outputs=[queue_table, queue_item, add_status],
+        )
+        requeue_button.click(
+            requeue_item,
+            inputs=queue_item,
+            outputs=[queue_table, queue_item, add_status],
+        )
+        clear_button.click(
+            clear_completed,
+            inputs=status_filter,
+            outputs=[
+                project,
+                project_browser,
+                voice,
+                variant,
+                language,
+                queue_table,
+                queue_item,
+                add_status,
+            ],
+        )
+        pause_button.click(request_pause, outputs=run_status)
+        resume_button.click(resume_flag, outputs=run_status)
+        run_button.click(
+            run_queue,
+            inputs=continue_on_error,
+            outputs=[queue_table, queue_item, run_status],
+        )
+
+    return demo
