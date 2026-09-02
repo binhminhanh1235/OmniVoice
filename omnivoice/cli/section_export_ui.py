@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from omnivoice.cli.project_studio import ProjectStudioController
-from omnivoice.section_export import export_section_mp3s, section_ids
+from omnivoice.section_export import (
+    create_section_mp3_archive,
+    export_section_mp3s,
+    section_ids,
+)
 
 
 def build_section_export_demo(
@@ -37,6 +41,9 @@ def build_section_export_demo(
         )
         return ids, generated, len(ids)
 
+    def reset_download_all():
+        return gr.update(value=None, visible=False)
+
     projects = project_items()
     initial_project = projects[0] if projects else None
     initial_sections, initial_generated, initial_total = selection_for(initial_project)
@@ -46,6 +53,7 @@ def build_section_export_demo(
             return (
                 gr.update(choices=[], value=[]),
                 [],
+                reset_download_all(),
                 "Select a project.",
             )
         try:
@@ -53,6 +61,7 @@ def build_section_export_demo(
             return (
                 gr.update(choices=ids, value=ids),
                 [],
+                reset_download_all(),
                 f"Selected all **{total}** sections by default · generated audio available for **{generated}/{total}**.",
             )
         except Exception as exc:
@@ -73,6 +82,7 @@ def build_section_export_demo(
             gr.update(choices=items, value=selected),
             gr.update(choices=ids, value=ids),
             [],
+            reset_download_all(),
             message,
         )
 
@@ -92,18 +102,29 @@ def build_section_export_demo(
         try:
             project = controller.load_project(project_path)
             result = export_section_mp3s(project, selected_sections)
+            archive = (
+                create_section_mp3_archive(project, result.files)
+                if len(result.files) > 1
+                else None
+            )
         except Exception as exc:
             raise gr.Error(f"MP3 export failed: {type(exc).__name__}: {exc}")
 
         files = [str(path) for path in result.files]
+        download_all = gr.update(
+            value=str(archive) if archive else None,
+            visible=archive is not None,
+        )
         message = f"Prepared **{len(files)}** MP3 file(s)."
+        if archive:
+            message += " Use **Download all selected** to get them in one ZIP."
         if result.reused:
             message += f" Reused cached exports: {', '.join(result.reused)}."
         if result.skipped:
             message += " Skipped: " + "; ".join(result.skipped) + "."
         if not files:
             message += " Generate the selected sections first, then try again."
-        return files, message
+        return files, download_all, message
 
     with gr.Blocks(title="Section MP3 Downloads") as demo:
         gr.Markdown(
@@ -140,6 +161,12 @@ def build_section_export_demo(
             if initial_project
             else "No projects found."
         )
+        download_all = gr.DownloadButton(
+            "Download all selected",
+            value=None,
+            visible=False,
+            variant="primary",
+        )
         files = gr.Files(
             label="MP3 files",
             file_count="multiple",
@@ -149,18 +176,18 @@ def build_section_export_demo(
         project.change(
             show_project,
             inputs=project,
-            outputs=[sections, files, status],
+            outputs=[sections, files, download_all, status],
         )
         refresh.click(
             refresh_projects,
-            outputs=[project, sections, files, status],
+            outputs=[project, sections, files, download_all, status],
         )
         all_button.click(select_all, inputs=project, outputs=sections)
         none_button.click(clear_selection, inputs=project, outputs=sections)
         export_button.click(
             prepare_downloads,
             inputs=[project, sections],
-            outputs=[files, status],
+            outputs=[files, download_all, status],
         )
 
     return demo
