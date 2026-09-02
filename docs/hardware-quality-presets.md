@@ -13,14 +13,25 @@ The **5. Hardware & Quality** tab reports:
 - recommended quality preset;
 - recommended ASR device.
 
-For a common Google Colab Tesla T4 / 16 GB runtime, Studio recommends:
+For a common **single** Google Colab/Kaggle Tesla T4 / ~16 GB runtime, Studio recommends:
 
 ```text
 quality preset = BALANCED
 ASR device     = cpu
 ```
 
-Keeping Whisper on CPU avoids competing with OmniVoice for T4 VRAM.
+Keeping Whisper on CPU avoids competing with OmniVoice for the only T4's VRAM.
+
+For a **dual-T4** Kaggle runtime, Studio recommends:
+
+```text
+cuda:0         = OmniVoice TTS
+cuda:1         = Whisper ASR
+quality preset = BALANCED
+ASR device     = cuda:1
+```
+
+The secondary GPU is preferred for ASR when it has at least 4 GB VRAM. This keeps the TTS decoder isolated on the primary GPU while moving repeated chunk verification and optional word-timestamp work off the CPU.
 
 Hardware recommendations are advisory. They never silently change a project's saved quality policy.
 
@@ -87,24 +98,41 @@ This is useful with Project Queue. Each queued project is loaded through the qua
 
 ## Recommended T4 workflow
 
+Single T4:
+
 ```text
 Hardware & Quality
     ↓
 T4 / ~16 GB detected
     ↓
+OmniVoice → cuda:0
+Whisper   → cpu
+    ↓
 workspace default = BALANCED
-    ↓
-important final project → override SAFE
-preview/test project     → override FAST
-    ↓
-Project Queue
 ```
 
-ASR should normally remain on CPU on T4:
+Dual T4 Kaggle:
+
+```text
+Hardware & Quality
+    ↓
+2 × T4 / ~15 GB each detected
+    ↓
+OmniVoice → cuda:0
+Whisper   → cuda:1
+    ↓
+workspace default = BALANCED
+```
+
+Important final projects can still override the workspace default to SAFE; preview/test projects can use FAST.
+
+Example dual-T4 launch:
 
 ```bash
 omnivoice-project-studio \
-  --asr-device cpu \
+  --device cuda:0 \
+  --asr-model openai/whisper-small.en \
+  --asr-device cuda:1 \
   ...
 ```
 

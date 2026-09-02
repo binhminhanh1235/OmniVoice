@@ -10,26 +10,50 @@ from omnivoice.hardware_quality import (
 
 
 class FakeCuda:
-    def __init__(self, *, available=True, name="Tesla T4", vram_gb=16.0, capability=(7, 5)):
+    def __init__(
+        self,
+        *,
+        available=True,
+        name="Tesla T4",
+        vram_gb=16.0,
+        capability=(7, 5),
+        devices=None,
+    ):
         self.available = available
         self.name = name
         self.vram_gb = vram_gb
         self.capability = capability
+        self.devices = devices
 
     def is_available(self):
         return self.available
 
     def device_count(self):
-        return 1 if self.available else 0
+        if not self.available:
+            return 0
+        if self.devices is not None:
+            return len(self.devices)
+        return 1
+
+    def _device(self, index):
+        if self.devices is None:
+            return {
+                "name": self.name,
+                "vram_gb": self.vram_gb,
+                "capability": self.capability,
+            }
+        return self.devices[index]
 
     def get_device_name(self, index):
-        return self.name
+        return self._device(index)["name"]
 
     def get_device_properties(self, index):
-        return SimpleNamespace(total_memory=int(self.vram_gb * 1024**3))
+        return SimpleNamespace(
+            total_memory=int(self._device(index)["vram_gb"] * 1024**3)
+        )
 
     def get_device_capability(self, index):
-        return self.capability
+        return self._device(index).get("capability", self.capability)
 
 
 class FakeTorch:
@@ -37,13 +61,38 @@ class FakeTorch:
         self.cuda = cuda
 
 
-def test_t4_recommends_balanced_and_cpu_asr():
+def test_single_t4_recommends_balanced_and_cpu_asr():
     hardware = detect_hardware(FakeTorch(FakeCuda()))
     assert hardware.cuda_available is True
     assert hardware.device_name == "Tesla T4"
     assert 15.9 <= hardware.total_vram_gb <= 16.1
     assert hardware.compute_capability == (7, 5)
     assert hardware.recommended_preset == "BALANCED"
+    assert hardware.recommended_asr_device == "cpu"
+
+
+def test_dual_t4_recommends_secondary_gpu_for_asr():
+    cuda = FakeCuda(
+        devices=[
+            {"name": "Tesla T4", "vram_gb": 15.0, "capability": (7, 5)},
+            {"name": "Tesla T4", "vram_gb": 15.0, "capability": (7, 5)},
+        ]
+    )
+    hardware = detect_hardware(FakeTorch(cuda), device_index=0)
+    assert hardware.device_count == 2
+    assert hardware.recommended_preset == "BALANCED"
+    assert hardware.recommended_asr_device == "cuda:1"
+    assert any("Dedicated ASR GPU" in note for note in hardware.notes)
+
+
+def test_secondary_gpu_below_four_gb_falls_back_to_cpu_asr():
+    cuda = FakeCuda(
+        devices=[
+            {"name": "Tesla T4", "vram_gb": 16.0, "capability": (7, 5)},
+            {"name": "Tiny GPU", "vram_gb": 2.0, "capability": (6, 1)},
+        ]
+    )
+    hardware = detect_hardware(FakeTorch(cuda), device_index=0)
     assert hardware.recommended_asr_device == "cpu"
 
 
