@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ from omnivoice.data_management import (
 )
 from omnivoice.project import OmniVoiceProject
 from omnivoice.project_queue import ProjectQueueItem, ProjectQueueStore
+from omnivoice.runtime_rclone import install_rclone_runtime
 
 
 SCRIPT = """# Data Management Demo
@@ -196,6 +199,30 @@ def test_drive_sync_uses_env_credentials_not_command_line(tmp_path, monkeypatch)
     assert env["RCLONE_CONFIG_OMNIVOICE_DRIVE_TYPE"] == "drive"
     assert env["RCLONE_CONFIG_OMNIVOICE_DRIVE_CLIENT_ID"] == "client-id-secret-value"
     assert "refresh-secret-value" in env["RCLONE_CONFIG_OMNIVOICE_DRIVE_TOKEN"]
+
+
+def test_runtime_rclone_installer_from_local_archive(tmp_path, monkeypatch):
+    archive_path = tmp_path / "rclone.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "rclone-vtest-linux-amd64/rclone",
+            "#!/bin/sh\necho 'rclone vTEST'\n",
+        )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setattr("omnivoice.runtime_rclone.shutil.which", lambda name: None)
+    monkeypatch.setattr("omnivoice.runtime_rclone._runtime_bin_dir", lambda: bin_dir)
+    monkeypatch.setattr("omnivoice.runtime_rclone.platform.machine", lambda: "x86_64")
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+
+    path, version = install_rclone_runtime(download_url=archive_path.as_uri())
+
+    assert path == bin_dir / "rclone"
+    assert path.exists()
+    assert os.access(path, os.X_OK)
+    assert version == "rclone vTEST"
+    assert str(bin_dir) in os.environ["PATH"].split(os.pathsep)
 
 
 def test_data_management_gradio_smoke(tmp_path):
