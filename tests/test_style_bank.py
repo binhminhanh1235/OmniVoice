@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import numpy as np
 
@@ -205,3 +206,37 @@ def test_resume_uses_section_status_sidecar_and_does_not_rerender(tmp_path):
 
     assert second_model.calls == []
     assert all(section.status == "verified" for section in reloaded.manifest.sections)
+
+
+def test_generation_recreates_missing_beats_directory(tmp_path):
+    """A restored/copy project can lose an empty beats/ directory and still resume."""
+
+    voices = _voices(tmp_path)
+    project = OmniVoiceProject.create(
+        SCRIPT,
+        tmp_path / "project",
+        max_chunk_words=30,
+        max_chunk_chars=240,
+    )
+
+    section = project.get_section("S03")
+    beats_dir = project.root / "sections" / section.id / "beats"
+    shutil.rmtree(beats_dir)
+    assert not beats_dir.exists()
+
+    model = FakeModel()
+    StyleBankProjectRunner(
+        model,
+        voices,
+        voice_name="David",
+        preferred_variant="AUTO",
+    ).generate(
+        project,
+        robust_config=_robust_without_asr(),
+        section_ids=["S03"],
+        resume=True,
+    )
+
+    assert beats_dir.is_dir()
+    assert (beats_dir / "B01.wav").exists()
+    assert (project.root / "sections" / "S03" / "S03.wav").exists()
