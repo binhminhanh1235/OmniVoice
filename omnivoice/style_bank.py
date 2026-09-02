@@ -41,6 +41,22 @@ from omnivoice.section_status import (
 from omnivoice.voice_library import VoiceLibrary, VoicePromptResolution
 
 
+def _ensure_section_audio_layout(project: OmniVoiceProject, section: Any) -> None:
+    """Recreate mutable section audio directories before generation/resume.
+
+    Project creation normally creates ``chunks/`` and ``beats/`` once, but a
+    restored/copied project may legitimately lose an empty subdirectory. Chunk
+    writes already self-heal ``chunks/``; beat assembly historically did not,
+    which surfaced as a generic libsndfile ``System error``. Keep the layout
+    repair close to the generation boundary so old projects resume safely.
+    """
+
+    section_dir = project._section_dir(section)
+    section_dir.mkdir(parents=True, exist_ok=True)
+    (section_dir / "chunks").mkdir(parents=True, exist_ok=True)
+    (section_dir / "beats").mkdir(parents=True, exist_ok=True)
+
+
 class StyleBankProjectRunner:
     """Generate a project with one Voice Library variant selected per beat."""
 
@@ -129,6 +145,12 @@ class StyleBankProjectRunner:
             if resume and section_is_complete(project, section):
                 continue
 
+            # Restore mutable layout for projects copied/restored from a prior
+            # session. In particular, _assemble_beat writes into ``beats/`` and
+            # libsndfile otherwise reports only a vague "System error" when the
+            # directory is absent.
+            _ensure_section_audio_layout(project, section)
+
             # Persist the in-flight state before expensive inference. If the
             # runtime is killed, restore_section_status maps this back to
             # pending on the next load.
@@ -214,9 +236,13 @@ class StyleBankProjectRunner:
                     chunk.updated_at = _utc_now()
                     project.save()
 
+                # Re-check just before the write in case an external restore or
+                # cleanup removed an empty directory while generation was busy.
+                _ensure_section_audio_layout(project, section)
                 project._assemble_beat(section, beat, sample_rate, profile)
                 project.save()
 
+            _ensure_section_audio_layout(project, section)
             project._assemble_section(section, sample_rate, self.style_resolver)
 
             # The final WAV already exists at this point. Persist the compact
