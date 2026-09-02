@@ -90,6 +90,28 @@ def test_delete_rejects_running_queue_project_and_path_escape(tmp_path):
     assert outside.root.exists()
 
 
+def test_delete_rejects_direct_inflight_section_generation(tmp_path):
+    workspace = tmp_path / "studio"
+    project = _project(workspace, "direct-running")
+    (project.root / "section-status.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sections": {
+                    "S01": {
+                        "status": "generating",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="in-progress section generation"):
+        delete_projects(workspace, [project.root])
+    assert project.root.exists()
+
+
 def test_drive_credentials_are_runtime_only_and_switchable(tmp_path):
     workspace = tmp_path / "studio"
     token_one = json.dumps({"access_token": "one", "refresh_token": "refresh-one"})
