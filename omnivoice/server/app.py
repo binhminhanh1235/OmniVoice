@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from omnivoice.runtime_workspace import RuntimeWorkspace
+from omnivoice.server.schemas import GenerateProjectRequest
 from omnivoice.services.job_manager import StudioJobManager
+from omnivoice.services.studio_commands import StudioCommandService
 from omnivoice.services.studio_service import StudioService
 
 
@@ -28,21 +30,26 @@ def create_studio_app(
     *,
     runtime: Optional[RuntimeWorkspace] = None,
     mount_ui: bool = True,
+    command_service: Optional[StudioCommandService] = None,
 ):
-    from fastapi import FastAPI, HTTPException, Query
+    from fastapi import FastAPI, Header, HTTPException, Query, Response
     from fastapi.responses import RedirectResponse
 
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
+    commands = command_service or StudioCommandService(model, workspace)
+    jobs.register("generate_project", commands.generate_project_job)
+
     app = FastAPI(
         title="OmniVoice Studio API",
-        version="0.2.0",
+        version="0.3.0",
         description=(
             "Machine-facing API for OmniVoice Studio with persistent single-GPU "
-            "job scheduling. Generation handlers are added in the next slice."
+            "jobs and resumable project generation."
         ),
     )
     app.state.studio_service = service
+    app.state.command_service = commands
     app.state.job_manager = jobs
     app.state.omnivoice_model = model
     app.add_event_handler("startup", jobs.start)
@@ -58,7 +65,11 @@ def create_studio_app(
     def capabilities():
         payload = service.capabilities()
         payload["features"]["job_manager"] = True
+        payload["features"]["async_generation"] = True
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
+        payload["endpoints"]["generate_project"] = (
+            "/api/v1/projects/{project_id}/generate"
+        )
         return payload
 
     @app.get("/api/v1/hardware", tags=["system"])
@@ -85,6 +96,49 @@ def create_studio_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Project not found") from exc
+
+    @app.post(
+        "/api/v1/projects/{project_id}/generate",
+        status_code=202,
+        tags=["projects", "jobs"],
+    )
+    def generate_project(
+        project_id: str,
+        request: GenerateProjectRequest,
+        response: Response,
+        idempotency_key: Optional[str] = Header(
+            default=None,
+            alias="Idempotency-Key",
+            description="Stable client key used to deduplicate retried submissions.",
+        ),
+    ):
+        try:
+            project = service.get_project(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Project not found") from exc
+
+        payload = request.model_dump(exclude_none=True)
+        payload["project_id"] = project_id
+        payload["project_path"] = project["path"]
+        try:
+            job = jobs.submit(
+                "generate_project",
+                payload,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        location = f"/api/v1/jobs/{job.id}"
+        response.headers["Location"] = location
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "location": location,
+            "idempotency_key": job.idempotency_key,
+        }
 
     @app.get("/api/v1/queue", tags=["queue"])
     def queue_summary():
@@ -125,6 +179,7 @@ def create_studio_app(
         demo = build_demo(model, workspace)
         app = gr.mount_gradio_app(app, demo, path="/ui")
         app.state.studio_service = service
+        app.state.command_service = commands
         app.state.job_manager = jobs
         app.state.omnivoice_model = model
 
