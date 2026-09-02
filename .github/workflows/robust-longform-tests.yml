@@ -9,6 +9,7 @@ on:
       - "omnivoice/services/**"
       - "omnivoice/server/**"
       - "omnivoice/mcp_server.py"
+      - "omnivoice/tunnel.py"
       - "omnivoice/text_doctor.py"
       - "omnivoice/voice_doctor.py"
       - "omnivoice/voice_stability.py"
@@ -48,6 +49,7 @@ on:
       - "docs/ai-native-foundation.md"
       - "docs/ai-native-sse.md"
       - "docs/ai-native-mcp.md"
+      - "docs/stable-tunnel.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
       - "docs/live-section-status.md"
@@ -66,6 +68,7 @@ on:
       - "tests/test_job_manager.py"
       - "tests/test_studio_commands.py"
       - "tests/test_mcp_server.py"
+      - "tests/test_tunnel.py"
       - "tests/test_project_studio_quality.py"
       - "tests/test_text_doctor.py"
       - "tests/test_text_doctor_ui.py"
@@ -118,6 +121,7 @@ on:
       - "feat/ai-native-write-api-v1"
       - "feat/ai-native-sse-v1"
       - "feat/ai-native-mcp-v1"
+      - "feat/stable-tunnel-v1"
 
 jobs:
   test:
@@ -159,6 +163,7 @@ jobs:
             tests/test_job_manager.py \
             tests/test_studio_commands.py \
             tests/test_mcp_server.py \
+            tests/test_tunnel.py \
             tests/test_project_studio_quality.py \
             tests/test_text_doctor.py \
             tests/test_text_doctor_ui.py \

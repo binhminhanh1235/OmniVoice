@@ -2,12 +2,13 @@
 # Copyright 2026 OmniVoice contributors
 # Licensed under the Apache License, Version 2.0
 
-"""CLI for the unified OmniVoice Studio web/API server."""
+"""CLI for the unified OmniVoice Studio web/API/MCP server."""
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 
 import torch
@@ -20,6 +21,12 @@ from omnivoice.runtime_workspace import (
     ensure_runtime_workspace,
 )
 from omnivoice.server.app import create_studio_app
+from omnivoice.tunnel import (
+    DEFAULT_PUBLIC_URL_ENV,
+    DEFAULT_TUNNEL_TOKEN_ENV,
+    CloudflareTunnel,
+    configure_mcp_security_for_public_url,
+)
 from omnivoice.utils.common import get_best_device
 
 logger = logging.getLogger(__name__)
@@ -31,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = subparsers.add_parser(
         "serve",
-        help="Serve Gradio UI and REST API from one FastAPI process.",
+        help="Serve Gradio UI, REST API, and MCP from one FastAPI process.",
     )
     serve.add_argument("--model", default="k2-fsa/OmniVoice")
     serve.add_argument("--device", default=None)
@@ -44,7 +51,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-ui",
         action="store_true",
         default=False,
-        help="Serve REST API only; do not mount Gradio at /ui.",
+        help="Serve API/MCP only; do not mount Gradio at /ui.",
+    )
+    serve.add_argument(
+        "--tunnel",
+        action="store_true",
+        default=False,
+        help="Run a remotely-managed Cloudflare Tunnel connector with the Studio server.",
+    )
+    serve.add_argument(
+        "--public-url",
+        default=None,
+        help=(
+            "Stable external origin, e.g. https://omnivoice.example.com. "
+            f"Defaults to ${DEFAULT_PUBLIC_URL_ENV}."
+        ),
+    )
+    serve.add_argument(
+        "--cloudflared",
+        default="cloudflared",
+        help="cloudflared binary name or path.",
+    )
+    serve.add_argument(
+        "--tunnel-token-env",
+        default=DEFAULT_TUNNEL_TOKEN_ENV,
+        help="Environment variable containing the remotely-managed tunnel token.",
+    )
+    serve.add_argument(
+        "--tunnel-loglevel",
+        choices=("debug", "info", "warn", "error", "fatal"),
+        default="info",
     )
     return parser
 
@@ -64,12 +100,25 @@ def _runtime_for_workspace(workspace: str | None) -> RuntimeWorkspace:
     return ensure_runtime_workspace(custom)
 
 
+def _public_endpoint(args):
+    value = str(args.public_url or os.environ.get(DEFAULT_PUBLIC_URL_ENV, "") or "").strip()
+    if not value:
+        if args.tunnel:
+            raise ValueError(
+                "--tunnel requires --public-url (or OMNIVOICE_PUBLIC_URL) so MCP can "
+                "allow exactly the stable public hostname."
+            )
+        return None
+    return configure_mcp_security_for_public_url(value)
+
+
 def serve(args) -> int:
     import uvicorn
 
     runtime = _runtime_for_workspace(args.workspace)
     hardware = detect_hardware()
     device = args.device or get_best_device()
+    public = _public_endpoint(args)
 
     logger.info("Runtime: %s", runtime.summary())
     logger.info("Hardware: %s", hardware.summary())
@@ -96,9 +145,31 @@ def serve(args) -> int:
     )
     logger.info("Studio UI: http://%s:%s/ui", args.host, args.port)
     logger.info("REST API: http://%s:%s/api/v1", args.host, args.port)
+    logger.info("MCP: http://%s:%s/mcp", args.host, args.port)
     logger.info("OpenAPI: http://%s:%s/docs", args.host, args.port)
     logger.info("Health: http://%s:%s/health", args.host, args.port)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    if public is not None:
+        logger.info("Public UI: %s", public.ui_url)
+        logger.info("Public REST API: %s", public.api_url)
+        logger.info("Public MCP: %s", public.mcp_url)
+        logger.info("Public Health: %s", public.health_url)
+
+    if not args.tunnel:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        return 0
+
+    tunnel = CloudflareTunnel(
+        binary=args.cloudflared,
+        token_env=args.tunnel_token_env,
+        loglevel=args.tunnel_loglevel,
+    )
+    logger.info(
+        "Starting Cloudflare Tunnel using token from $%s (token is not placed on the command line).",
+        args.tunnel_token_env,
+    )
+    with tunnel:
+        logger.info("Named tunnel connector is running; starting Studio origin server.")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 
