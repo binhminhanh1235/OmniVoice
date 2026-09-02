@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -40,6 +41,14 @@ def create_studio_app(
     commands = command_service or StudioCommandService(model, workspace)
     jobs.register("generate_project", commands.generate_project_job)
 
+    @asynccontextmanager
+    async def lifespan(_app):
+        jobs.start()
+        try:
+            yield
+        finally:
+            jobs.shutdown()
+
     app = FastAPI(
         title="OmniVoice Studio API",
         version="0.3.0",
@@ -47,13 +56,12 @@ def create_studio_app(
             "Machine-facing API for OmniVoice Studio with persistent single-GPU "
             "jobs and resumable project generation."
         ),
+        lifespan=lifespan,
     )
     app.state.studio_service = service
     app.state.command_service = commands
     app.state.job_manager = jobs
     app.state.omnivoice_model = model
-    app.add_event_handler("startup", jobs.start)
-    app.add_event_handler("shutdown", jobs.shutdown)
 
     @app.get("/health", tags=["system"])
     def health():
