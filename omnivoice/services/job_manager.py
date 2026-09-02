@@ -308,6 +308,39 @@ class StudioJobManager:
         job = self.get(job_id)
         return [event for event in job.events if event.seq > int(seq)]
 
+    def wait_for_events(
+        self,
+        job_id: str,
+        seq: int = 0,
+        *,
+        timeout: float = 15.0,
+    ) -> tuple[list[JobEvent], JobRecord]:
+        """Block until new events arrive, the job terminates, or timeout elapses.
+
+        SSE and other streaming adapters use the same condition as the worker,
+        so idle streams do not busy-poll ``jobs.json``.
+        """
+
+        after = int(seq)
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        with self._condition:
+            while True:
+                manifest = self.store.load()
+                job = self.store.find(manifest, job_id)
+                snapshot = JobRecord.from_dict(job.to_dict())
+                events = [
+                    JobEvent(**asdict(event))
+                    for event in job.events
+                    if event.seq > after
+                ]
+                if events or snapshot.status in _TERMINAL:
+                    return events, snapshot
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0 or self._stop:
+                    return [], snapshot
+                self._condition.wait(timeout=remaining)
+
     def emit(
         self,
         job_id: str,
@@ -390,6 +423,7 @@ class StudioJobManager:
             job.progress = 1.0
         self._append_event(job, status, message, job.progress, {})
         self.store.save(manifest)
+        self._condition.notify_all()
 
     def _worker_loop(self) -> None:
         while True:

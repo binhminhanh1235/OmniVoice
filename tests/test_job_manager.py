@@ -129,3 +129,48 @@ def test_events_after_returns_only_newer_events(tmp_path):
     newer = manager.events_after(job.id, seq=2)
     assert all(event.seq > 2 for event in newer)
     assert newer[-1].event == "completed"
+
+
+def test_wait_for_events_wakes_when_new_event_is_emitted(tmp_path):
+    manager = StudioJobManager(tmp_path)
+    manager.register("noop", lambda ctx: {})
+    job = manager.submit("noop", {})
+    baseline = job.events[-1].seq
+
+    def emit_later():
+        time.sleep(0.05)
+        manager.emit(
+            job.id,
+            event="test.progress",
+            message="new event",
+            progress=0.5,
+        )
+
+    thread = threading.Thread(target=emit_later)
+    thread.start()
+    started = time.monotonic()
+    events, snapshot = manager.wait_for_events(job.id, baseline, timeout=1.0)
+    elapsed = time.monotonic() - started
+    thread.join(timeout=1.0)
+
+    assert elapsed < 0.5
+    assert [event.event for event in events] == ["test.progress"]
+    assert snapshot.status == "queued"
+
+
+def test_wait_for_events_returns_immediately_for_terminal_job(tmp_path):
+    manager = StudioJobManager(tmp_path)
+    manager.register("noop", lambda ctx: {"ok": True})
+    manager.start()
+    job = manager.submit("noop", {})
+    finished = wait_for_terminal(manager, job.id)
+    last_seq = finished.events[-1].seq
+
+    started = time.monotonic()
+    events, snapshot = manager.wait_for_events(job.id, last_seq, timeout=1.0)
+    elapsed = time.monotonic() - started
+    manager.shutdown()
+
+    assert events == []
+    assert snapshot.status == "completed"
+    assert elapsed < 0.2
