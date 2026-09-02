@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 OmniVoice contributors
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
+# Licensed under the Apache License, Version 2.0
 
 """Full Project Studio launcher with quality-aware queue and hardware presets."""
 
@@ -15,11 +15,14 @@ import torch
 
 from omnivoice import OmniVoice
 from omnivoice.cli import project_studio_quality as quality_module
+from omnivoice.cli.advanced_settings_ui import build_advanced_settings_demo
 from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
 from omnivoice.cli.data_management_ui import build_data_management_demo
 from omnivoice.cli.generation_control_ui import build_generation_control_demo
 from omnivoice.cli.project_queue_ui import build_project_queue_demo
-from omnivoice.cli.project_studio_pause import PauseAwareQualityPresetProjectStudioController
+from omnivoice.cli.project_studio_advanced import (
+    AdvancedSettingsProjectStudioController,
+)
 from omnivoice.cli.project_studio_quality import (
     build_hardware_quality_demo,
     build_quality_project_demo,
@@ -39,11 +42,11 @@ def build_demo(model, workspace: str | Path):
     import gradio as gr
 
     # Existing Studio builders resolve their controller class from
-    # project_studio_quality at runtime. Replace that one integration seam with
-    # the pause-aware subclass so Generate/Resume, Queue, History and export all
-    # keep the same quality/resume behavior while respecting project pause state.
+    # project_studio_quality at runtime. Replace that integration seam with the
+    # pause-aware + advanced-settings subclass so Generate/Resume, Queue,
+    # History and exports all share one project settings contract.
     quality_module.QualityPresetProjectStudioController = (
-        PauseAwareQualityPresetProjectStudioController
+        AdvancedSettingsProjectStudioController
     )
     install_quality_controller()
 
@@ -53,23 +56,28 @@ def build_demo(model, workspace: str | Path):
     generation_control = build_generation_control_demo(
         model,
         workspace,
-        controller_cls=PauseAwareQualityPresetProjectStudioController,
+        controller_cls=AdvancedSettingsProjectStudioController,
     )
     project_queue = build_project_queue_demo(
         model,
         workspace,
-        controller_cls=PauseAwareQualityPresetProjectStudioController,
+        controller_cls=AdvancedSettingsProjectStudioController,
     )
     hardware = build_hardware_quality_demo(model, workspace)
+    advanced = build_advanced_settings_demo(
+        model,
+        workspace,
+        controller_cls=AdvancedSettingsProjectStudioController,
+    )
     downloads = build_section_export_demo(
         model,
         workspace,
-        controller_cls=PauseAwareQualityPresetProjectStudioController,
+        controller_cls=AdvancedSettingsProjectStudioController,
     )
     data_management = build_data_management_demo(
         model,
         workspace,
-        controller_cls=PauseAwareQualityPresetProjectStudioController,
+        controller_cls=AdvancedSettingsProjectStudioController,
     )
     demo = gr.TabbedInterface(
         [
@@ -79,6 +87,7 @@ def build_demo(model, workspace: str | Path):
             generation_control,
             project_queue,
             hardware,
+            advanced,
             downloads,
             data_management,
         ],
@@ -89,8 +98,9 @@ def build_demo(model, workspace: str | Path):
             "4. Pause / Resume",
             "5. Project Queue",
             "6. Hardware & Quality",
-            "7. Section MP3 Downloads",
-            "8. Data Management",
+            "7. Advanced Settings",
+            "8. Section MP3 Downloads",
+            "9. Data Management",
         ],
         title="OmniVoice Project Studio",
     )
@@ -104,7 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Launch OmniVoice Project Studio with Text Doctor, Voice Doctor, "
-            "persistent resume/queue, hardware detection and quality presets"
+            "persistent resume/queue, hardware detection, quality presets and "
+            "optional per-project advanced generation settings"
         )
     )
     parser.add_argument("--model", default="k2-fsa/OmniVoice")
