@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -141,3 +142,51 @@ def export_section_mp3s(
         skipped=tuple(skipped),
         reused=tuple(reused),
     )
+
+
+def create_section_mp3_archive(
+    project: OmniVoiceProject,
+    files: Iterable[str | Path],
+) -> Path:
+    """Bundle two or more exported section MP3 files into one fast ZIP download.
+
+    MP3 is already compressed, so the archive deliberately uses ``ZIP_STORED``
+    rather than spending CPU trying to compress audio again. Only files from the
+    project's own ``exports/mp3`` directory are accepted.
+    """
+
+    export_dir = (project.root / "exports" / "mp3").resolve()
+    selected: list[Path] = []
+    seen: set[Path] = set()
+    for item in files:
+        path = Path(item).expanduser().resolve()
+        if path in seen:
+            continue
+        if path.parent != export_dir:
+            raise ValueError(f"Archive input is outside project MP3 exports: {path}")
+        if not path.exists() or not path.is_file() or path.stat().st_size <= 0:
+            raise ValueError(f"Archive input is missing or empty: {path}")
+        if path.suffix.lower() != ".mp3":
+            raise ValueError(f"Archive input is not MP3: {path}")
+        seen.add(path)
+        selected.append(path)
+
+    if len(selected) < 2:
+        raise ValueError("At least two MP3 files are required for Download all")
+
+    archive_dir = project.root / "exports"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive = archive_dir / f"{project.root.name}-selected-sections.zip"
+    temp = archive.with_suffix(".tmp.zip")
+    temp.unlink(missing_ok=True)
+
+    try:
+        with zipfile.ZipFile(temp, mode="w", compression=zipfile.ZIP_STORED) as bundle:
+            for path in selected:
+                bundle.write(path, arcname=path.name)
+        temp.replace(archive)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+
+    return archive
