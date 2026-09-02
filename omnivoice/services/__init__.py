@@ -12,10 +12,12 @@ from omnivoice.services.job_manager import (
     StudioJobManager,
     wait_for_terminal,
 )
+from omnivoice.services.studio_commands import StudioCommandService
 from omnivoice.services.studio_service import StudioService
 
 __all__ = [
     "StudioService",
+    "StudioCommandService",
     "JOBS_FILE",
     "JOB_STATUSES",
     "JobCancelled",
