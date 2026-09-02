@@ -12,11 +12,43 @@ share the same project/job state rather than implementing parallel workflows.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+import os
 from typing import Any, Optional
 
 from omnivoice.services.job_manager import StudioJobManager
 from omnivoice.services.studio_service import StudioService
+
+
+def _csv_env(name: str) -> list[str]:
+    value = str(os.environ.get(name, "") or "")
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def mcp_transport_security_from_env():
+    """Return official MCP transport security settings for this deployment.
+
+    Defaults to ``None`` so the SDK's localhost-only DNS-rebinding protection
+    remains active. Public deployments should set explicit allowlists. A
+    trusted reverse proxy/tunnel may opt out explicitly with
+    ``OMNIVOICE_MCP_TRUST_PROXY=1``; this should only be used when the proxy is
+    the actual security boundary.
+    """
+
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    trust_proxy = str(os.environ.get("OMNIVOICE_MCP_TRUST_PROXY", "")).lower()
+    if trust_proxy in {"1", "true", "yes", "on"}:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts = _csv_env("OMNIVOICE_MCP_ALLOWED_HOSTS")
+    allowed_origins = _csv_env("OMNIVOICE_MCP_ALLOWED_ORIGINS")
+    if not allowed_hosts and not allowed_origins:
+        return None
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 class OmniVoiceMCPTools:
