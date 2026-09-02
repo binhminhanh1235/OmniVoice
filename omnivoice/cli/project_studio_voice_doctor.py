@@ -14,6 +14,7 @@ from pathlib import Path
 import torch
 
 from omnivoice import OmniVoice
+from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
 from omnivoice.cli.project_queue_ui import build_project_queue_demo
 from omnivoice.cli.project_studio_quality import (
     QualityPresetProjectStudioController,
@@ -49,7 +50,7 @@ def build_demo(model, workspace: str | Path):
         workspace,
         controller_cls=QualityPresetProjectStudioController,
     )
-    return gr.TabbedInterface(
+    demo = gr.TabbedInterface(
         [text_doctor, voice_doctor, studio, project_queue, hardware, downloads],
         [
             "1. Text Doctor",
@@ -61,6 +62,9 @@ def build_demo(model, workspace: str | Path):
         ],
         title="OmniVoice Project Studio",
     )
+    audio_players = enable_audio_download_buttons(demo)
+    logger.info("Enabled download controls for %s Studio audio player(s)", audio_players)
+    return demo
 
 
 def build_parser() -> argparse.ArgumentParser:
