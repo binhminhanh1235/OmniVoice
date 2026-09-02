@@ -21,6 +21,7 @@ from omnivoice.cli.project_studio_quality import (
     build_quality_project_demo,
     install_quality_controller,
 )
+from omnivoice.cli.section_export_ui import build_section_export_demo
 from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
 from omnivoice.hardware_quality import detect_hardware
@@ -43,14 +44,20 @@ def build_demo(model, workspace: str | Path):
         controller_cls=QualityPresetProjectStudioController,
     )
     hardware = build_hardware_quality_demo(model, workspace)
+    downloads = build_section_export_demo(
+        model,
+        workspace,
+        controller_cls=QualityPresetProjectStudioController,
+    )
     return gr.TabbedInterface(
-        [text_doctor, voice_doctor, studio, project_queue, hardware],
+        [text_doctor, voice_doctor, studio, project_queue, hardware, downloads],
         [
             "1. Text Doctor",
             "2. Voice Doctor",
             "3. Project Studio",
             "4. Project Queue",
             "5. Hardware & Quality",
+            "6. Section MP3 Downloads",
         ],
         title="OmniVoice Project Studio",
     )
@@ -78,7 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--asr-device",
         default="cpu",
-        help="ASR device. T4/16 GB Kaggle or Colab is safest with cpu; see Hardware & Quality tab.",
+        help=(
+            "ASR device. A single T4 usually keeps ASR on cpu; dual-T4 Kaggle can "
+            "dedicate cuda:1 to ASR."
+        ),
     )
     parser.add_argument("--ip", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
