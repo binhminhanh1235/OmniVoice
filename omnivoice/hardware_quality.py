@@ -187,7 +187,14 @@ def quality_preset_rows() -> list[list[Any]]:
 
 
 def detect_hardware(torch_module: Any = None, *, device_index: int = 0) -> HardwareCapabilities:
-    """Inspect the local CUDA device without allocating a model."""
+    """Inspect local CUDA devices without allocating a model.
+
+    The primary ``device_index`` is assumed to host OmniVoice.  When another
+    CUDA GPU with at least 4 GB VRAM is available, it is preferred for Whisper
+    ASR so verification does not compete with the TTS decoder for VRAM.  This
+    maps well to Kaggle's common dual-T4 runtime: ``cuda:0`` for OmniVoice and
+    ``cuda:1`` for ASR.
+    """
 
     if torch_module is None:
         import torch as torch_module  # type: ignore
@@ -216,26 +223,57 @@ def detect_hardware(torch_module: Any = None, *, device_index: int = 0) -> Hardw
         capability = None
 
     notes: list[str] = []
-    # T4 / 16 GB class GPUs are the common Colab target.  Keep Whisper on CPU
-    # so ASR does not compete with OmniVoice for scarce VRAM.
+    # Primary-device policy.  A single 16 GB-class GPU keeps ASR on CPU so it
+    # cannot steal decoder VRAM from OmniVoice.
     if vram_gb <= 18.0:
         preset = "BALANCED"
         asr_device = "cpu"
-        notes.append("16 GB-class GPU: keep Whisper/ASR on CPU to protect decoder VRAM.")
+        notes.append("16 GB-class primary GPU: BALANCED protects long-running decoder stability.")
     elif vram_gb < 32.0:
         preset = "SAFE"
         asr_device = "cpu"
-        notes.append("Enough VRAM for SAFE; CPU ASR remains the conservative default.")
+        notes.append("Enough primary VRAM for SAFE; CPU ASR remains the conservative single-GPU default.")
     else:
         preset = "SAFE"
         asr_device = f"cuda:{index}"
-        notes.append("High-VRAM GPU: ASR can share CUDA if lower latency is preferred.")
+        notes.append("High-VRAM primary GPU: ASR can share CUDA if lower latency is preferred.")
 
     lowered = name.lower()
     if "t4" in lowered:
         preset = "BALANCED"
-        asr_device = "cpu"
         notes.append("Tesla T4 detected: BALANCED is recommended for long continuous queues.")
+
+    # Prefer a dedicated secondary accelerator for ASR.  This intentionally
+    # happens after the single-GPU policy above so a dual T4 becomes
+    # cuda:0=OmniVoice, cuda:1=Whisper rather than falling back to CPU.
+    secondary_index: Optional[int] = None
+    secondary_vram_gb = 0.0
+    if count >= 2:
+        for candidate in range(count):
+            if candidate == index:
+                continue
+            try:
+                candidate_properties = cuda.get_device_properties(candidate)
+                candidate_memory = float(
+                    getattr(candidate_properties, "total_memory", 0.0)
+                )
+                candidate_vram_gb = (
+                    candidate_memory / (1024**3) if candidate_memory > 0 else 0.0
+                )
+            except Exception:
+                candidate_vram_gb = 0.0
+            if candidate_vram_gb >= 4.0:
+                secondary_index = candidate
+                secondary_vram_gb = candidate_vram_gb
+                break
+
+    if secondary_index is not None:
+        asr_device = f"cuda:{secondary_index}"
+        secondary_name = str(cuda.get_device_name(secondary_index))
+        notes.append(
+            f"Dedicated ASR GPU detected: use {asr_device} ({secondary_name}, "
+            f"{secondary_vram_gb:.1f} GB) for Whisper and keep cuda:{index} for OmniVoice."
+        )
 
     return HardwareCapabilities(
         cuda_available=True,
