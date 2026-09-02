@@ -66,6 +66,10 @@ def test_api_health_capabilities_projects_and_queue(tmp_path):
     assert capabilities.json()["endpoints"]["api"] == "/api/v1"
     assert capabilities.json()["features"]["job_manager"] is True
     assert capabilities.json()["features"]["async_generation"] is True
+    assert capabilities.json()["features"]["sse_job_stream"] is True
+    assert capabilities.json()["endpoints"]["job_stream"] == (
+        "/api/v1/jobs/{job_id}/stream"
+    )
 
     projects = client.get("/api/v1/projects", params={"status": "PENDING"})
     assert projects.status_code == 200
@@ -170,6 +174,82 @@ def test_job_api_exposes_persisted_job_and_events(tmp_path):
         events = client.get(f"/api/v1/jobs/{job.id}/events", params={"after": 1})
         assert events.status_code == 200
         assert all(item["seq"] > 1 for item in events.json()["items"])
+
+
+def test_job_sse_stream_replays_history_and_closes_at_terminal_event(tmp_path):
+    app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
+    manager = app.state.job_manager
+
+    def echo(ctx):
+        ctx.emit("half", progress=0.5, event="work.half", data={"phase": "test"})
+        return {"ok": True}
+
+    manager.register("echo", echo)
+    with TestClient(app) as client:
+        job = manager.submit("echo", {})
+        finished = wait_for_terminal(manager, job.id)
+
+        response = client.get(f"/api/v1/jobs/{job.id}/stream")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["cache-control"] == "no-cache, no-transform"
+        assert "event: queued\n" in response.text
+        assert "event: work.half\n" in response.text
+        assert "event: completed\n" in response.text
+        assert f"id: {finished.events[-1].seq}\n" in response.text
+        assert '"progress":0.5' in response.text
+
+
+def test_job_sse_stream_resumes_from_last_event_id(tmp_path):
+    app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
+    manager = app.state.job_manager
+
+    def echo(ctx):
+        ctx.emit("one", progress=0.25, event="work.one")
+        ctx.emit("two", progress=0.75, event="work.two")
+        return {"ok": True}
+
+    manager.register("echo", echo)
+    with TestClient(app) as client:
+        job = manager.submit("echo", {})
+        finished = wait_for_terminal(manager, job.id)
+        cutoff = finished.events[-2].seq
+
+        response = client.get(
+            f"/api/v1/jobs/{job.id}/stream",
+            headers={"Last-Event-ID": str(cutoff)},
+        )
+        assert response.status_code == 200
+        assert f"id: {cutoff}\n" not in response.text
+        assert f"id: {finished.events[-1].seq}\n" in response.text
+        assert "event: completed\n" in response.text
+        assert "event: work.two\n" not in response.text
+
+
+def test_job_sse_stream_validates_job_and_cursor_before_streaming(tmp_path):
+    app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
+    manager = app.state.job_manager
+    manager.register("noop", lambda ctx: {})
+
+    with TestClient(app) as client:
+        missing = client.get("/api/v1/jobs/job_missing/stream")
+        assert missing.status_code == 404
+
+        job = manager.submit("noop", {})
+        finished = wait_for_terminal(manager, job.id)
+        assert finished.status == "completed"
+
+        invalid = client.get(
+            f"/api/v1/jobs/{job.id}/stream",
+            headers={"Last-Event-ID": "not-a-number"},
+        )
+        assert invalid.status_code == 400
+
+        negative = client.get(
+            f"/api/v1/jobs/{job.id}/stream",
+            params={"after": -1},
+        )
+        assert negative.status_code == 422
 
 
 def test_api_returns_useful_errors(tmp_path):
