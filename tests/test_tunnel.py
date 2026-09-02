@@ -121,3 +121,91 @@ def test_cloudflare_tunnel_reports_missing_binary_or_token(monkeypatch):
     monkeypatch.delenv("CLOUDFLARE_TUNNEL_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="Tunnel token is missing"):
         CloudflareTunnel(startup_grace_seconds=0).start()
+
+
+# Auth tests live in this already-selected CI module so the public-deployment
+# guardrails are exercised by the current regression workflow.
+from fastapi.testclient import TestClient
+
+from omnivoice.auth import GENERATE_SCOPE, MCP_SCOPE, READ_SCOPE, StudioAuthConfig
+from omnivoice.server.app import create_studio_app
+
+
+def _auth_config(
+    *,
+    token=None,
+    scopes=frozenset({READ_SCOPE, GENERATE_SCOPE, MCP_SCOPE}),
+    public_url=None,
+    ui_username=None,
+    ui_password=None,
+    trust_external_ui_auth=False,
+):
+    return StudioAuthConfig(
+        bearer_token=token,
+        scopes=frozenset(scopes),
+        public_url=public_url,
+        allow_insecure_public=False,
+        ui_username=ui_username,
+        ui_password=ui_password,
+        trust_external_ui_auth=trust_external_ui_auth,
+    )
+
+
+def test_public_auth_fails_closed_without_machine_token():
+    auth = _auth_config(public_url="https://omnivoice.example.com")
+    with pytest.raises(RuntimeError, match="OMNIVOICE_API_TOKEN"):
+        auth.validate(mount_ui=False, mount_mcp=False)
+
+
+def test_public_auth_requires_mcp_scope_and_ui_protection():
+    with pytest.raises(RuntimeError, match=MCP_SCOPE):
+        _auth_config(
+            token="secret",
+            scopes={READ_SCOPE},
+            public_url="https://omnivoice.example.com",
+        ).validate(mount_ui=False, mount_mcp=True)
+
+    with pytest.raises(RuntimeError, match="Public Gradio UI"):
+        _auth_config(
+            token="secret",
+            public_url="https://omnivoice.example.com",
+        ).validate(mount_ui=True, mount_mcp=False)
+
+    _auth_config(
+        token="secret",
+        public_url="https://omnivoice.example.com",
+        ui_username="owner",
+        ui_password="password",
+    ).validate(mount_ui=True, mount_mcp=False)
+
+
+def test_bearer_gate_keeps_health_public_and_enforces_scope(tmp_path):
+    auth = _auth_config(token="top-secret", scopes={READ_SCOPE})
+    app = create_studio_app(
+        None,
+        tmp_path / "studio",
+        mount_ui=False,
+        mount_mcp=False,
+        auth_config=auth,
+    )
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/api/v1/projects").status_code == 401
+        assert client.get(
+            "/api/v1/projects",
+            headers={"Authorization": "Bearer wrong"},
+        ).status_code == 401
+
+        allowed = client.get(
+            "/api/v1/projects",
+            headers={"Authorization": "Bearer top-secret"},
+        )
+        assert allowed.status_code == 200
+
+        forbidden = client.post(
+            "/api/v1/projects/missing/generate",
+            json={"voice_name": "Narrator"},
+            headers={"Authorization": "Bearer top-secret"},
+        )
+        assert forbidden.status_code == 403
+        assert forbidden.json()["error"] == "insufficient_scope"

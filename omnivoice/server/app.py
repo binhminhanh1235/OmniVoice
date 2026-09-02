@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
+from omnivoice.auth import StudioAuthConfig, StudioBearerAuthMiddleware
 from omnivoice.mcp_server import (
     create_omnivoice_mcp_server,
     mcp_transport_security_from_env,
@@ -52,9 +53,13 @@ def create_studio_app(
     mount_ui: bool = True,
     mount_mcp: bool = True,
     command_service: Optional[StudioCommandService] = None,
+    auth_config: Optional[StudioAuthConfig] = None,
 ):
     from fastapi import FastAPI, Header, HTTPException, Query
     from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+
+    auth = auth_config or StudioAuthConfig.from_env()
+    auth.validate(mount_ui=mount_ui, mount_mcp=mount_mcp)
 
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
@@ -88,24 +93,39 @@ def create_studio_app(
 
     app = FastAPI(
         title="OmniVoice Studio API",
-        version="0.5.0",
+        version="0.6.0",
         description=(
-            "Unified OmniVoice Studio host with Gradio UI, REST/OpenAPI, durable "
-            "single-GPU jobs, live SSE progress, and Model Context Protocol tools."
+            "Unified OmniVoice Studio host with authenticated Gradio UI, REST/OpenAPI, "
+            "durable single-GPU jobs, live SSE progress, and Model Context Protocol tools."
         ),
         lifespan=lifespan,
     )
+    if auth.bearer_enabled:
+        app.add_middleware(StudioBearerAuthMiddleware, config=auth)
+
     app.state.studio_service = service
     app.state.command_service = commands
     app.state.job_manager = jobs
     app.state.omnivoice_model = model
     app.state.mcp_server = mcp_server
+    app.state.auth_config = auth
 
     @app.get("/health", tags=["system"])
     def health():
         payload = service.health()
         payload["job_manager"] = "ready"
         payload["mcp"] = "enabled" if mcp_server is not None else "disabled"
+        payload["auth"] = {
+            "public": bool(auth.public_url),
+            "machine": "bearer" if auth.bearer_enabled else "disabled",
+            "ui": (
+                "basic"
+                if auth.ui_basic_auth
+                else "external"
+                if auth.trust_external_ui_auth
+                else "disabled"
+            ),
+        }
         return payload
 
     @app.get("/api/v1/capabilities", tags=["system"])
@@ -115,6 +135,7 @@ def create_studio_app(
         payload["features"]["async_generation"] = True
         payload["features"]["sse_job_stream"] = True
         payload["features"]["mcp"] = mcp_server is not None
+        payload["features"]["bearer_auth"] = auth.bearer_enabled
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
         payload["endpoints"]["job_stream"] = "/api/v1/jobs/{job_id}/stream"
         payload["endpoints"]["generate_project"] = (
@@ -282,12 +303,19 @@ def create_studio_app(
         from omnivoice.cli.project_studio_voice_doctor import build_demo
 
         demo = build_demo(model, workspace)
-        app = gr.mount_gradio_app(app, demo, path="/ui")
+        app = gr.mount_gradio_app(
+            app,
+            demo,
+            path="/ui",
+            auth=auth.ui_basic_auth,
+            auth_message="OmniVoice Studio private UI" if auth.ui_basic_auth else None,
+        )
         app.state.studio_service = service
         app.state.command_service = commands
         app.state.job_manager = jobs
         app.state.omnivoice_model = model
         app.state.mcp_server = mcp_server
+        app.state.auth_config = auth
 
         @app.get("/", include_in_schema=False)
         def root():
