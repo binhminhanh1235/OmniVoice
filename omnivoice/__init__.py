@@ -101,6 +101,8 @@ from omnivoice.runtime_workspace import (
     detect_runtime_workspace,
     ensure_runtime_workspace,
 )
+from omnivoice.services.studio_service import StudioService
+from omnivoice.server.app import create_studio_app
 from omnivoice.section_history import (
     HISTORY_DIR_NAME,
     HISTORY_INDEX_NAME,
@@ -173,6 +175,8 @@ __all__ = [
     "detect_runtime_workspace",
     "default_execution_workspace",
     "ensure_runtime_workspace",
+    "StudioService",
+    "create_studio_app",
     "OmniVoiceProject",
     "ProjectManifest",
     "ProjectSection",
