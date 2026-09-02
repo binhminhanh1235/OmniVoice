@@ -1,0 +1,38 @@
+name: Notebook JSON validation
+
+on:
+  pull_request:
+    paths:
+      - "notebooks/**"
+      - ".github/workflows/notebook-json.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "notebooks/**"
+      - ".github/workflows/notebook-json.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate every notebook
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          notebooks = sorted(Path("notebooks").glob("*.ipynb"))
+          if not notebooks:
+              raise SystemExit("No notebooks found")
+          for path in notebooks:
+              with path.open("r", encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              if payload.get("nbformat") != 4:
+                  raise SystemExit(f"{path}: expected nbformat 4")
+              print("OK", path)
+          PY
