@@ -22,6 +22,7 @@ from omnivoice.data_management import (
     sync_projects_to_drive,
     verify_drive_connection,
 )
+from omnivoice.runtime_rclone import install_rclone_runtime
 
 
 def build_data_management_demo(
@@ -48,13 +49,13 @@ def build_data_management_demo(
         if connected:
             return (
                 "⚠️ Google Drive credentials are connected, but `rclone` is not installed in this runtime. "
-                "Install rclone before syncing."
+                "Click **Install rclone in this runtime** before syncing."
             )
         if rclone:
             return "rclone is available. Connect a Google account when you want to sync."
         return (
-            "rclone is not installed in this runtime. On Kaggle/Colab install it before syncing, "
-            "for example with `apt-get install -y rclone`, then click **Check connection**."
+            "rclone is not installed in this runtime. Click **Install rclone in this runtime**; "
+            "the binary is installed only under the runtime temporary directory."
         )
 
     projects = project_items()
@@ -87,6 +88,13 @@ def build_data_management_demo(
             gr.update(value=False),
             message,
         )
+
+    def install_runtime_rclone():
+        try:
+            path, version = install_rclone_runtime()
+            return f"✅ {version} · runtime binary: `{path}`. {connection_message()}"
+        except Exception as exc:
+            raise gr.Error(f"rclone install failed: {type(exc).__name__}: {exc}")
 
     def make_auth_command(client_id, client_secret):
         try:
@@ -195,6 +203,7 @@ def build_data_management_demo(
         drive_status = gr.Markdown(connection_message())
 
         with gr.Row():
+            install_rclone_button = gr.Button("Install rclone in this runtime")
             check_drive_button = gr.Button("Check connection")
             disconnect_button = gr.Button("Disconnect / switch account")
 
@@ -262,6 +271,7 @@ def build_data_management_demo(
             inputs=[delete_selection, delete_confirm],
             outputs=[delete_selection, sync_selection, delete_confirm, delete_status],
         )
+        install_rclone_button.click(install_runtime_rclone, outputs=drive_status)
         auth_button.click(
             make_auth_command,
             inputs=[client_id, client_secret],
