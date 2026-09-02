@@ -47,7 +47,13 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 ## P2 — efficiency and lower-friction setup
 
 1. [x] Auto Best Reference Segment: rank clean 3–10 second windows from long recordings, listen before selection, optional ASR transcript suggestion.
-2. [ ] Colab hardware detection and quality presets (`Safe`, `Balanced`, `Fast`) without exposing a wall of generation parameters.
+2. [x] Colab hardware detection and quality presets (`SAFE`, `BALANCED`, `FAST`) without exposing a wall of generation parameters.
+   - hardware summary: CUDA, GPU, VRAM, compute capability, recommended ASR device;
+   - T4 / 16 GB recommendation: `BALANCED` + ASR on CPU;
+   - `SAFE`: 32 steps, 3 retries, adaptive retry + pacing guard + ASR verification;
+   - `BALANCED`: 28 steps, 2 retries, adaptive retry + pacing guard + ASR verification;
+   - `FAST`: 24 steps, 1 retry, no adaptive repair/pacing timestamps, but ASR text verification remains enabled;
+   - workspace default in `hardware-quality.json`, optional per-project override in `studio.json`.
 3. [ ] Cache reusable verification/preprocessing metadata and avoid repeated ASR/setup work.
 4. [ ] Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
 5. [ ] Same-language reference selection when one voice has multiple language variants.
@@ -63,21 +69,23 @@ This roadmap prioritizes reliable long-form narration on Google Colab first, the
 
 ## Next priority
 
-After Project Queue status/filtering is validated in CI and real Colab use, the next implementation target returns to **Colab hardware detection + quality presets**.
+The next implementation target is **reusable preprocessing / verification caching**.
 
-The goal is not to add more knobs. It is to reduce them:
+The goal is to avoid repeating work that does not change between retries, resumes, and queued projects:
 
 ```text
-GPU / VRAM / ASR availability
+normalized text / hashes
+voice prompt resolution
+ASR / verification metadata where safely reusable
+project + chunk fingerprints
         ↓
-automatic capability detection
+cache
         ↓
-Safe | Balanced | Fast
-        ↓
-appropriate generation + verification defaults
+less setup / repeated analysis
+without skipping required verification of newly generated audio
 ```
 
-`Safe` should preserve the current strongest verification behavior. `Balanced` may reduce retry/verification cost conservatively. `Fast` should only trade quality for speed when the user explicitly selects it.
+The cache must never mark newly generated audio as verified merely because an older candidate with the same text once passed. Generated-audio verification remains tied to the audio fingerprint.
 
 ## Architectural rule
 

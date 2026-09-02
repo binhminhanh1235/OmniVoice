@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator, Optional
 
+from omnivoice.hardware_quality import normalize_quality_preset
 from omnivoice.section_status import incomplete_section_ids, section_is_complete
 
 QUEUE_FILE_NAME = "project-queue.json"
@@ -54,6 +55,7 @@ class ProjectQueueItem:
     voice_name: str
     voice_variant: str = "AUTO"
     language: Optional[str] = "en"
+    quality_preset: str = "SAFE"
     strict: bool = False
     auto_merge: bool = True
     status: str = "pending"
@@ -70,7 +72,13 @@ class ProjectQueueItem:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ProjectQueueItem":
         allowed = cls.__dataclass_fields__.keys()
-        return cls(**{key: value for key, value in payload.items() if key in allowed})
+        values = {key: value for key, value in payload.items() if key in allowed}
+        if "quality_preset" in values:
+            try:
+                values["quality_preset"] = normalize_quality_preset(values["quality_preset"])
+            except ValueError:
+                values["quality_preset"] = "SAFE"
+        return cls(**values)
 
 
 @dataclass
@@ -149,13 +157,36 @@ class ProjectQueueStore:
                 )
                 changed = True
         if manifest.paused:
-            # A pause request belongs to the dead process. Re-opening Studio
-            # should not leave the queue permanently inert.
             manifest.paused = False
             changed = True
         if changed:
             self.save(manifest)
         return manifest
+
+    def _quality_preset_for(
+        self,
+        controller: Any,
+        project: Any,
+        settings: dict[str, Any],
+        requested: Optional[str],
+    ) -> str:
+        if requested:
+            return normalize_quality_preset(requested)
+        if settings.get("quality_preset"):
+            return normalize_quality_preset(settings["quality_preset"])
+        resolver = getattr(controller, "project_quality_preset", None)
+        if callable(resolver):
+            try:
+                return normalize_quality_preset(resolver(project)[0])
+            except Exception:
+                pass
+        workspace_default = getattr(controller, "workspace_quality_preset", None)
+        if callable(workspace_default):
+            try:
+                return normalize_quality_preset(workspace_default())
+            except Exception:
+                pass
+        return "SAFE"
 
     def enqueue(
         self,
@@ -165,6 +196,7 @@ class ProjectQueueStore:
         voice_name: Optional[str] = None,
         voice_variant: Optional[str] = None,
         language: Optional[str] = None,
+        quality_preset: Optional[str] = None,
         strict: bool = False,
         auto_merge: bool = True,
     ) -> ProjectQueueItem:
@@ -180,6 +212,12 @@ class ProjectQueueStore:
         ).upper()
         selected_language = (
             language if language is not None else settings.get("language", "en")
+        )
+        selected_quality = self._quality_preset_for(
+            controller,
+            project,
+            settings,
+            quality_preset,
         )
 
         manifest = self.load()
@@ -203,6 +241,7 @@ class ProjectQueueStore:
             voice_name=selected_voice,
             voice_variant=selected_variant,
             language=selected_language,
+            quality_preset=selected_quality,
             strict=bool(strict),
             auto_merge=bool(auto_merge),
             completed_sections=complete,
@@ -302,6 +341,22 @@ class ProjectQueueRunner:
     def _pause_requested(self) -> bool:
         return bool(self.store.load().paused)
 
+    def _generate_section(self, item: ProjectQueueItem, section_id: str) -> None:
+        kwargs = dict(
+            voice_name=item.voice_name,
+            voice_variant=item.voice_variant,
+            language=item.language,
+            section_ids=[section_id],
+            resume=True,
+            strict=item.strict,
+        )
+        # Preserve compatibility with legacy/fake controllers while passing the
+        # snapshotted quality policy to the quality-aware controller used by the
+        # full Project Studio launcher.
+        if callable(getattr(self.controller, "workspace_quality_preset", None)):
+            kwargs["quality_preset"] = item.quality_preset
+        self.controller.generate(item.project_path, **kwargs)
+
     def run(
         self,
         *,
@@ -309,8 +364,6 @@ class ProjectQueueRunner:
     ) -> Generator[QueueEvent, None, ProjectQueueManifest]:
         manifest = self.store.recover_interrupted()
 
-        # Snapshot IDs so newly added projects join the next queue pass. Items
-        # removed before their turn are simply skipped.
         for seed in list(manifest.items):
             current_manifest = self.store.load()
             try:
@@ -348,7 +401,8 @@ class ProjectQueueRunner:
                 "running",
                 None,
                 f"Starting {item.project_title}: "
-                f"{item.completed_sections}/{item.total_sections} sections complete.",
+                f"{item.completed_sections}/{item.total_sections} sections complete "
+                f"with quality={item.quality_preset}.",
             )
 
             try:
@@ -375,18 +429,11 @@ class ProjectQueueRunner:
                         item.project_title,
                         "running",
                         section_id,
-                        f"Generating {item.project_title} / {section_id}...",
+                        f"Generating {item.project_title} / {section_id} "
+                        f"[{item.quality_preset}]...",
                     )
 
-                    self.controller.generate(
-                        item.project_path,
-                        voice_name=item.voice_name,
-                        voice_variant=item.voice_variant,
-                        language=item.language,
-                        section_ids=[section_id],
-                        resume=True,
-                        strict=item.strict,
-                    )
+                    self._generate_section(item, section_id)
                     self._refresh_progress(item)
                     self._save_item(item)
                     yield QueueEvent(
@@ -418,8 +465,6 @@ class ProjectQueueRunner:
                             )
                             item.merged_audio = str(merged)
                         except Exception as exc:
-                            # Audio generation is still complete. Keep the item
-                            # completed and expose merge failure separately.
                             item.error = (
                                 f"Auto-merge failed: {type(exc).__name__}: {exc}"
                             )
@@ -457,7 +502,12 @@ class ProjectQueueRunner:
 
 
 def queue_rows(manifest: ProjectQueueManifest) -> list[list[Any]]:
-    """Stable table representation shared by UI/tests."""
+    """Stable table representation shared by UI/tests.
+
+    The visual table shape remains backward-compatible; quality is persisted in
+    the item and surfaced in runner messages instead of adding another wide UI
+    column to an already dense queue table.
+    """
 
     rows: list[list[Any]] = []
     for index, item in enumerate(manifest.items, start=1):

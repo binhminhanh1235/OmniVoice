@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "omnivoice/adaptive_quality.py"
+      - "omnivoice/hardware_quality.py"
       - "omnivoice/text_doctor.py"
       - "omnivoice/voice_doctor.py"
       - "omnivoice/voice_stability.py"
@@ -23,6 +24,7 @@ on:
       - "omnivoice/cli/project_studio_live.py"
       - "omnivoice/cli/project_studio_text.py"
       - "omnivoice/cli/project_studio_resume.py"
+      - "omnivoice/cli/project_studio_quality.py"
       - "omnivoice/cli/project_studio_text_resume.py"
       - "omnivoice/cli/project_studio_voice_doctor.py"
       - "omnivoice/cli/project_queue_ui.py"
@@ -36,6 +38,7 @@ on:
       - "docs/project-studio.md"
       - "docs/project-studio-roadmap.md"
       - "docs/project-queue.md"
+      - "docs/hardware-quality-presets.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
       - "docs/live-section-status.md"
@@ -47,6 +50,8 @@ on:
       - "docs/voice-stability-score.md"
       - "docs/auto-reference-segment.md"
       - "tests/test_adaptive_quality.py"
+      - "tests/test_hardware_quality.py"
+      - "tests/test_project_studio_quality.py"
       - "tests/test_text_doctor.py"
       - "tests/test_text_doctor_ui.py"
       - "tests/test_voice_doctor.py"
@@ -90,6 +95,7 @@ on:
       - "feat/section-version-history"
       - "feat/auto-reference-segment"
       - "feat/project-queue"
+      - "feat/hardware-quality-presets-v2"
 
 jobs:
   test:
@@ -123,6 +129,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_adaptive_quality.py \
+            tests/test_hardware_quality.py \
+            tests/test_project_studio_quality.py \
             tests/test_text_doctor.py \
             tests/test_text_doctor_ui.py \
             tests/test_voice_doctor.py \
