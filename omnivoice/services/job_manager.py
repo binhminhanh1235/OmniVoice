@@ -80,8 +80,7 @@ class JobRecord:
         return cls(**values)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        return payload
+        return asdict(self)
 
 
 @dataclass
@@ -416,9 +415,12 @@ class StudioJobManager:
 
             context = JobContext(self, job.id, job.payload)
             try:
+                # Cancellation is cooperative. The manager checks once before a
+                # handler begins; after that the handler owns safe checkpoints.
+                # If the handler returns successfully, the work is complete even
+                # if a late cancellation request arrived during its final unit.
                 context.checkpoint()
                 result = handler(context) or {}
-                context.checkpoint()
                 with self._condition:
                     self._finish(
                         job.id,
