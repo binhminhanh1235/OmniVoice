@@ -8,6 +8,7 @@ on:
       - "omnivoice/runtime_workspace.py"
       - "omnivoice/services/**"
       - "omnivoice/server/**"
+      - "omnivoice/mcp_server.py"
       - "omnivoice/text_doctor.py"
       - "omnivoice/voice_doctor.py"
       - "omnivoice/voice_stability.py"
@@ -45,6 +46,8 @@ on:
       - "docs/hardware-quality-presets.md"
       - "docs/kaggle-local-workspace.md"
       - "docs/ai-native-foundation.md"
+      - "docs/ai-native-sse.md"
+      - "docs/ai-native-mcp.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
       - "docs/live-section-status.md"
@@ -62,6 +65,7 @@ on:
       - "tests/test_studio_server.py"
       - "tests/test_job_manager.py"
       - "tests/test_studio_commands.py"
+      - "tests/test_mcp_server.py"
       - "tests/test_project_studio_quality.py"
       - "tests/test_text_doctor.py"
       - "tests/test_text_doctor_ui.py"
@@ -112,6 +116,8 @@ on:
       - "feat/ai-native-foundation-v1"
       - "feat/ai-native-jobs-v1"
       - "feat/ai-native-write-api-v1"
+      - "feat/ai-native-sse-v1"
+      - "feat/ai-native-mcp-v1"
 
 jobs:
   test:
@@ -152,6 +158,7 @@ jobs:
             tests/test_studio_server.py \
             tests/test_job_manager.py \
             tests/test_studio_commands.py \
+            tests/test_mcp_server.py \
             tests/test_project_studio_quality.py \
             tests/test_text_doctor.py \
             tests/test_text_doctor_ui.py \
