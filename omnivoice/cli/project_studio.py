@@ -24,7 +24,11 @@ from typing import Any, Iterable, Optional
 import torch
 
 from omnivoice import OmniVoice, OmniVoiceGenerationConfig
-from omnivoice.project import OmniVoiceProject, parse_project_script
+from omnivoice.project import OmniVoiceProject
+from omnivoice.project_narration import (
+    create_narration_project,
+    parse_narration_project_script,
+)
 from omnivoice.robust_longform import RobustLongFormConfig
 from omnivoice.style_bank import StyleBankProjectRunner
 from omnivoice.utils.common import get_best_device
@@ -113,8 +117,16 @@ class ProjectStudioController:
         self.projects_root.mkdir(parents=True, exist_ok=True)
         self.voices = VoiceLibrary(self.voices_root)
 
-    def parse_script(self, script: str) -> tuple[list[list[Any]], str]:
-        manifest = parse_project_script(script)
+    def parse_script(
+        self,
+        script: str,
+        *,
+        speak_section_titles: bool = False,
+    ) -> tuple[list[list[Any]], str]:
+        manifest = parse_narration_project_script(
+            script,
+            speak_section_titles=speak_section_titles,
+        )
         rows = []
         total_chunks = 0
         for section in manifest.sections:
@@ -130,9 +142,14 @@ class ProjectStudioController:
                     chunks,
                 ]
             )
+        title_note = (
+            "Section titles are included as narration."
+            if speak_section_titles
+            else "Section titles are metadata and will not be spoken."
+        )
         return rows, (
             f"Parsed {len(manifest.sections)} sections and {total_chunks} chunks. "
-            "Directives/headings are metadata and will not be spoken."
+            f"{title_note} Directives are always metadata."
         )
 
     def list_projects(self) -> list[str]:
@@ -145,15 +162,20 @@ class ProjectStudioController:
         self,
         script: str,
         *,
+        speak_section_titles: bool = False,
         overwrite: bool = False,
     ) -> OmniVoiceProject:
-        manifest = parse_project_script(script)
+        manifest = parse_narration_project_script(
+            script,
+            speak_section_titles=speak_section_titles,
+        )
         root = self.projects_root / manifest.slug
-        return OmniVoiceProject.create(
+        return create_narration_project(
             script,
             root,
             max_chunk_words=manifest.max_chunk_words,
             max_chunk_chars=manifest.max_chunk_chars,
+            speak_section_titles=speak_section_titles,
             overwrite=overwrite,
         )
 
@@ -390,9 +412,12 @@ def build_demo(model: Any, workspace: str | Path):
             message,
         )
 
-    def parse_script(script):
+    def parse_script(script, speak_titles):
         try:
-            rows, message = controller.parse_script(script)
+            rows, message = controller.parse_script(
+                script,
+                speak_section_titles=bool(speak_titles),
+            )
             return rows, message
         except Exception as exc:
             return [], f"Parse error: {type(exc).__name__}: {exc}"
@@ -402,18 +427,23 @@ def build_demo(model: Any, workspace: str | Path):
         value = projects[0] if projects else None
         return gr.update(choices=projects, value=value), f"Found {len(projects)} projects."
 
-    def create_project(script, overwrite):
+    def create_project(script, speak_titles, overwrite):
         try:
-            project = controller.create_project(script, overwrite=bool(overwrite))
+            project = controller.create_project(
+                script,
+                speak_section_titles=bool(speak_titles),
+                overwrite=bool(overwrite),
+            )
             projects = controller.list_projects()
             rows, chunks, sections = controller.project_view(project.root)
+            title_suffix = " Titles will be spoken." if speak_titles else ""
             return (
                 str(project.root),
                 gr.update(choices=projects, value=str(project.root)),
                 rows,
                 gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
                 gr.update(choices=sections, value=(sections[0] if sections else None)),
-                f"Created project: {project.manifest.title}",
+                f"Created project: {project.manifest.title}.{title_suffix}",
             )
         except Exception as exc:
             return (
@@ -566,6 +596,11 @@ def build_demo(model: Any, workspace: str | Path):
             with gr.Row():
                 parse_button = gr.Button("Parse Script")
                 create_button = gr.Button("Create Project", variant="primary")
+                speak_section_titles = gr.Checkbox(
+                    label="Read section titles (###)",
+                    value=False,
+                    info="When enabled, each ### title becomes the first spoken beat of its section.",
+                )
                 overwrite = gr.Checkbox(label="Overwrite same project", value=False)
             parse_table = gr.Dataframe(headers=parse_headers, interactive=False)
             parse_message = gr.Markdown()
@@ -636,14 +671,18 @@ def build_demo(model: Any, workspace: str | Path):
             ],
             outputs=[saved_voice, saved_variant, voice_message],
         )
-        parse_button.click(parse_script, inputs=script, outputs=[parse_table, parse_message])
+        parse_button.click(
+            parse_script,
+            inputs=[script, speak_section_titles],
+            outputs=[parse_table, parse_message],
+        )
         refresh_project_button.click(
             refresh_projects,
             outputs=[project_picker, parse_message],
         )
         create_button.click(
             create_project,
-            inputs=[script, overwrite],
+            inputs=[script, speak_section_titles, overwrite],
             outputs=[
                 project_state,
                 project_picker,
