@@ -1,15 +1,22 @@
 from pathlib import Path
+import threading
+import time
 
 import torch
 
 from omnivoice import VoiceClonePrompt
 from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
+from omnivoice.cli.generation_control_ui import build_generation_control_demo
 from omnivoice.cli.project_studio import (
     ProjectStudioController,
     _split_section_ids,
     build_demo,
     build_parser,
 )
+from omnivoice.cli.project_studio_pause import (
+    PauseAwareQualityPresetProjectStudioController,
+)
+from omnivoice.generation_control import clear_pause, pause_requested, request_pause
 
 
 SCRIPT = """# Demo Project
@@ -33,6 +40,14 @@ class FakeModel:
             ref_text=kwargs.get("ref_text") or "auto transcript",
             ref_rms=0.1,
         )
+
+
+class FakePauseController:
+    def __init__(self, model, workspace):
+        self.workspace = Path(workspace)
+
+    def list_projects(self):
+        return []
 
 
 def test_split_section_ids():
@@ -109,6 +124,43 @@ def test_audio_players_expose_download_control_across_tabs():
             assert "download" in audio.buttons
         else:
             assert audio.show_download_button is True
+
+
+def test_generation_pause_state_roundtrip(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert pause_requested(project) is False
+    request_pause(project)
+    assert pause_requested(project) is True
+    clear_pause(project)
+    assert pause_requested(project) is False
+
+
+def test_pause_aware_controller_waits_until_resume(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    request_pause(project)
+
+    controller = object.__new__(PauseAwareQualityPresetProjectStudioController)
+    controller.pause_poll_seconds = 0.01
+    worker = threading.Thread(target=controller._wait_for_resume, args=(project,))
+    worker.start()
+    time.sleep(0.05)
+    assert worker.is_alive()
+
+    clear_pause(project)
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+
+
+def test_generation_control_gradio_build_smoke(tmp_path: Path):
+    demo = build_generation_control_demo(
+        FakeModel(),
+        tmp_path / "studio",
+        controller_cls=FakePauseController,
+    )
+    assert demo is not None
 
 
 def test_project_studio_gradio_build_smoke(tmp_path: Path):
