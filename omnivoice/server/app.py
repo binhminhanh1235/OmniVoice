@@ -12,6 +12,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
+from omnivoice.mcp_server import (
+    create_omnivoice_mcp_server,
+    mcp_transport_security_from_env,
+)
 from omnivoice.runtime_workspace import RuntimeWorkspace
 from omnivoice.server.schemas import GenerateProjectRequest
 from omnivoice.services.job_manager import JobEvent, StudioJobManager
@@ -46,6 +50,7 @@ def create_studio_app(
     *,
     runtime: Optional[RuntimeWorkspace] = None,
     mount_ui: bool = True,
+    mount_mcp: bool = True,
     command_service: Optional[StudioCommandService] = None,
 ):
     from fastapi import FastAPI, Header, HTTPException, Query
@@ -56,20 +61,37 @@ def create_studio_app(
     commands = command_service or StudioCommandService(model, workspace)
     jobs.register("generate_project", commands.generate_project_job)
 
+    mcp_server = None
+    mcp_http_app = None
+    if mount_mcp:
+        mcp_server = create_omnivoice_mcp_server(service, jobs)
+        mcp_http_app = mcp_server.streamable_http_app(
+            streamable_http_path="/",
+            json_response=True,
+            stateless_http=True,
+            transport_security=mcp_transport_security_from_env(),
+        )
+
     @asynccontextmanager
     async def lifespan(_app):
         jobs.start()
         try:
-            yield
+            if mcp_server is None:
+                yield
+            else:
+                # Mounted ASGI sub-app lifespans are not run by Starlette, so the
+                # unified Studio host owns the MCP session manager lifecycle.
+                async with mcp_server.session_manager.run():
+                    yield
         finally:
             jobs.shutdown()
 
     app = FastAPI(
         title="OmniVoice Studio API",
-        version="0.4.0",
+        version="0.5.0",
         description=(
-            "Machine-facing API for OmniVoice Studio with persistent single-GPU "
-            "jobs, resumable project generation, and live SSE progress."
+            "Unified OmniVoice Studio host with Gradio UI, REST/OpenAPI, durable "
+            "single-GPU jobs, live SSE progress, and Model Context Protocol tools."
         ),
         lifespan=lifespan,
     )
@@ -77,11 +99,13 @@ def create_studio_app(
     app.state.command_service = commands
     app.state.job_manager = jobs
     app.state.omnivoice_model = model
+    app.state.mcp_server = mcp_server
 
     @app.get("/health", tags=["system"])
     def health():
         payload = service.health()
         payload["job_manager"] = "ready"
+        payload["mcp"] = "enabled" if mcp_server is not None else "disabled"
         return payload
 
     @app.get("/api/v1/capabilities", tags=["system"])
@@ -90,11 +114,13 @@ def create_studio_app(
         payload["features"]["job_manager"] = True
         payload["features"]["async_generation"] = True
         payload["features"]["sse_job_stream"] = True
+        payload["features"]["mcp"] = mcp_server is not None
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
         payload["endpoints"]["job_stream"] = "/api/v1/jobs/{job_id}/stream"
         payload["endpoints"]["generate_project"] = (
             "/api/v1/projects/{project_id}/generate"
         )
+        payload["endpoints"]["mcp"] = "/mcp" if mcp_server is not None else None
         return payload
 
     @app.get("/api/v1/hardware", tags=["system"])
@@ -247,6 +273,9 @@ def create_studio_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Job not found") from exc
 
+    if mcp_http_app is not None:
+        app.mount("/mcp", mcp_http_app, name="omnivoice-mcp")
+
     if mount_ui:
         import gradio as gr
 
@@ -258,6 +287,7 @@ def create_studio_app(
         app.state.command_service = commands
         app.state.job_manager = jobs
         app.state.omnivoice_model = model
+        app.state.mcp_server = mcp_server
 
         @app.get("/", include_in_schema=False)
         def root():
