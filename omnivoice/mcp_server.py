@@ -59,12 +59,20 @@ class OmniVoiceMCPTools:
         self.jobs = jobs
 
     def studio_status(self) -> dict[str, Any]:
-        """Return runtime, hardware, and API capability information."""
+        """Return runtime, hardware, and capabilities from the MCP surface."""
 
+        capabilities = self.service.capabilities()
+        capabilities["features"]["mcp"] = True
+        capabilities["features"]["job_manager"] = True
+        capabilities["features"]["async_generation"] = True
+        capabilities["features"]["sse_job_stream"] = True
+        capabilities["endpoints"]["mcp"] = "/mcp"
+        capabilities["endpoints"]["jobs"] = "/api/v1/jobs"
+        capabilities["endpoints"]["job_stream"] = "/api/v1/jobs/{job_id}/stream"
         return {
             "health": self.service.health(),
             "hardware": self.service.hardware(),
-            "capabilities": self.service.capabilities(),
+            "capabilities": capabilities,
         }
 
     def list_projects(
@@ -133,12 +141,13 @@ class OmniVoiceMCPTools:
             if value is not None:
                 payload[key] = value
 
+        key = None
+        if idempotency_key is not None:
+            key = str(idempotency_key).strip() or None
         job = self.jobs.submit(
             "generate_project",
             payload,
-            idempotency_key=(str(idempotency_key).strip() or None)
-            if idempotency_key is not None
-            else None,
+            idempotency_key=key,
         )
         return {
             "job_id": job.id,
@@ -258,6 +267,4 @@ def create_omnivoice_mcp_server(
 
         return tools.queue_resource()
 
-    # Retain the protocol-neutral implementation for tests and advanced callers.
-    mcp.omnivoice_tools = tools
     return mcp
