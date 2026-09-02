@@ -33,8 +33,8 @@ def create_studio_app(
     mount_ui: bool = True,
     command_service: Optional[StudioCommandService] = None,
 ):
-    from fastapi import FastAPI, Header, HTTPException, Query, Response
-    from fastapi.responses import RedirectResponse
+    from fastapi import FastAPI, Header, HTTPException, Query
+    from fastapi.responses import JSONResponse, RedirectResponse
 
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
@@ -113,7 +113,6 @@ def create_studio_app(
     def generate_project(
         project_id: str,
         request: GenerateProjectRequest,
-        response: Response,
         idempotency_key: Optional[str] = Header(
             default=None,
             alias="Idempotency-Key",
@@ -140,13 +139,16 @@ def create_studio_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         location = f"/api/v1/jobs/{job.id}"
-        response.headers["Location"] = location
-        return {
-            "job_id": job.id,
-            "status": job.status,
-            "location": location,
-            "idempotency_key": job.idempotency_key,
-        }
+        return JSONResponse(
+            status_code=202,
+            headers={"Location": location},
+            content={
+                "job_id": job.id,
+                "status": job.status,
+                "location": location,
+                "idempotency_key": job.idempotency_key,
+            },
+        )
 
     @app.get("/api/v1/queue", tags=["queue"])
     def queue_summary():
