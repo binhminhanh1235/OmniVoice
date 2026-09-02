@@ -13,6 +13,8 @@ OmniVoice Studio is evolving from a Gradio-only application into one production 
               │                │                │
               └──────── Application Services ──┘
                                │
+                      Persistent Job Manager
+                               │
                     Project / Voice / Queue
                                │
                          OmniVoice Core
@@ -20,9 +22,7 @@ OmniVoice Studio is evolving from a Gradio-only application into one production 
 
 The Gradio UI remains supported. It is mounted under the same FastAPI process instead of being the only way to reach the application.
 
-## v1 server
-
-Start the unified server:
+## Unified server
 
 ```bash
 omnivoice-studio serve \
@@ -34,14 +34,18 @@ omnivoice-studio serve \
 Current endpoints:
 
 ```text
-/ui                       Gradio web UI
-/health                   lightweight health check
-/api/v1/capabilities      runtime and feature discovery
-/api/v1/hardware          GPU / VRAM / quality recommendation
-/api/v1/projects          project list, optional status filter
-/api/v1/projects/{id}     one project summary
-/api/v1/queue             queue summary
-/docs                     OpenAPI documentation
+/ui                            Gradio web UI
+/health                        lightweight health check
+/api/v1/capabilities           runtime and feature discovery
+/api/v1/hardware               GPU / VRAM / quality recommendation
+/api/v1/projects               project list, optional status filter
+/api/v1/projects/{id}          one project summary
+/api/v1/queue                  queue summary
+/api/v1/jobs                   job list
+/api/v1/jobs/{id}              durable job + event history
+/api/v1/jobs/{id}/events       events after a sequence number
+/api/v1/jobs/{id}/cancel       cooperative cancellation request
+/docs                          OpenAPI documentation
 ```
 
 The legacy `omnivoice-project-studio --share` launcher remains available while the stable-hostname publishing layer is being built.
@@ -56,23 +60,52 @@ FastAPI route ─┐
 MCP tool ──────┘
 ```
 
-This prevents separate Gradio, REST and MCP implementations from drifting apart.
+## Persistent single-GPU Job Manager
 
-## Long-running GPU work
-
-Generation is intentionally not exposed as a synchronous REST write in this first slice. The next write-capable layer will add a single-GPU job manager:
+GPU-bound tasks run through one FIFO worker. This prevents Preview, TTS generation and Voice Stability from competing for the same Kaggle GPU once their handlers are registered.
 
 ```text
-POST generate
-     ↓
-job_id
-     ↓
-GPU worker = 1
-     ↓
-section/chunk checkpoint events
+QUEUED
+  ↓
+RUNNING
+  ├──→ COMPLETED
+  ├──→ FAILED
+  └──→ CANCEL_REQUESTED → safe checkpoint → CANCELLED
 ```
 
-The API will then expose job status and an event stream instead of keeping an HTTP request open during a long render.
+State and bounded event history are stored in:
+
+```text
+<workspace>/jobs.json
+```
+
+If the server/runtime stops while a job is `RUNNING` or `CANCEL_REQUESTED`, startup recovers it to `QUEUED`. Project generation handlers can then rely on `section-status.json` to resume only unfinished sections.
+
+### Idempotency
+
+`StudioJobManager.submit(..., idempotency_key=...)` returns the existing job for the same key instead of duplicating work. This is essential for AI clients that may retry after a network timeout.
+
+### Cooperative cancellation
+
+The worker is never force-killed in the middle of model inference. Handlers call `ctx.checkpoint()` at safe boundaries such as between sections/chunks. A cancellation request becomes effective at the next checkpoint.
+
+## Next write-capable slice
+
+The next layer registers real handlers and write endpoints:
+
+```text
+POST /api/v1/projects/{id}/generate
+          ↓
+        job_id
+          ↓
+   single GPU worker
+          ↓
+ section-by-section generation
+          ↓
+ section-status.json checkpoint
+```
+
+The HTTP request returns immediately. Clients poll job state or consume the future SSE stream instead of keeping one request open for a long render.
 
 ## Stable hostname plan
 
@@ -83,8 +116,6 @@ https://omnivoice.example.com/mcp
 ```
 
 They must not point directly at a random `*.gradio.live` session URL.
-
-The first publishing design is:
 
 ```text
 ChatGPT / Claude / Antigravity
@@ -115,13 +146,14 @@ Destructive operations are not part of the initial MCP tool set.
 
 ## Development sequence
 
-1. Application Service layer.
-2. Unified FastAPI + mounted Gradio server.
-3. Read-only REST/OpenAPI endpoints.
-4. Async single-GPU Job Manager + event stream.
-5. Write REST endpoints.
-6. MCP server using the same services/jobs.
-7. Stable hostname / named tunnel deployment path.
-8. Universal OmniVoice Skill.
-9. ChatGPT, Claude and Antigravity adapters.
-10. Optional persistent control plane and worker registry.
+1. [x] Application Service layer.
+2. [x] Unified FastAPI + mounted Gradio server.
+3. [x] Read-only REST/OpenAPI endpoints.
+4. [x] Persistent single-GPU Job Manager and durable event history.
+5. [ ] Write REST handlers for preview/generate/queue/regenerate/merge.
+6. [ ] SSE event stream.
+7. [ ] MCP server using the same services/jobs.
+8. [ ] Stable hostname / named tunnel deployment path.
+9. [ ] Universal OmniVoice Skill.
+10. [ ] ChatGPT, Claude and Antigravity adapters.
+11. [ ] Optional persistent control plane and worker registry.

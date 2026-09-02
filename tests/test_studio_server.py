@@ -3,6 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from omnivoice.server.app import create_studio_app
+from omnivoice.services.job_manager import wait_for_terminal
 
 
 def write_pending_project(workspace):
@@ -50,6 +51,7 @@ def test_api_health_capabilities_projects_and_queue(tmp_path):
     capabilities = client.get("/api/v1/capabilities")
     assert capabilities.status_code == 200
     assert capabilities.json()["endpoints"]["api"] == "/api/v1"
+    assert capabilities.json()["features"]["job_manager"] is True
 
     projects = client.get("/api/v1/projects", params={"status": "PENDING"})
     assert projects.status_code == 200
@@ -64,6 +66,35 @@ def test_api_health_capabilities_projects_and_queue(tmp_path):
     assert queue.json()["items"] == []
 
 
+def test_job_api_exposes_persisted_job_and_events(tmp_path):
+    app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
+    manager = app.state.job_manager
+
+    def echo(ctx):
+        ctx.emit("half", progress=0.5, data={"phase": "test"})
+        return {"echo": ctx.payload["value"]}
+
+    manager.register("echo", echo)
+    with TestClient(app) as client:
+        job = manager.submit("echo", {"value": "hello"})
+        finished = wait_for_terminal(manager, job.id)
+        assert finished.status == "completed"
+
+        listed = client.get("/api/v1/jobs")
+        assert listed.status_code == 200
+        assert listed.json()["items"][0]["id"] == job.id
+        assert "events" not in listed.json()["items"][0]
+
+        detail = client.get(f"/api/v1/jobs/{job.id}")
+        assert detail.status_code == 200
+        assert detail.json()["result"] == {"echo": "hello"}
+        assert detail.json()["events"][-1]["event"] == "completed"
+
+        events = client.get(f"/api/v1/jobs/{job.id}/events", params={"after": 1})
+        assert events.status_code == 200
+        assert all(item["seq"] > 1 for item in events.json()["items"])
+
+
 def test_api_returns_useful_errors(tmp_path):
     app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
     client = TestClient(app)
@@ -76,6 +107,11 @@ def test_api_returns_useful_errors(tmp_path):
 
     traversal = client.get("/api/v1/projects/%2E%2E%2Fsecret")
     assert traversal.status_code in {400, 404}
+
+    missing_job = client.get("/api/v1/jobs/job_missing")
+    assert missing_job.status_code == 404
+    cancel_missing = client.post("/api/v1/jobs/job_missing/cancel")
+    assert cancel_missing.status_code == 404
 
 
 def test_api_only_root_redirects_to_openapi(tmp_path):
