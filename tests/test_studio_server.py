@@ -38,6 +38,19 @@ def write_pending_project(workspace):
     )
 
 
+class FakeCommandService:
+    def __init__(self):
+        self.calls = []
+
+    def generate_project_job(self, ctx):
+        self.calls.append(dict(ctx.payload))
+        ctx.emit("generated", progress=1.0, event="project.finished")
+        return {
+            "project_id": ctx.payload["project_id"],
+            "project_status": "DONE",
+        }
+
+
 def test_api_health_capabilities_projects_and_queue(tmp_path):
     workspace = tmp_path / "studio"
     write_pending_project(workspace)
@@ -52,6 +65,7 @@ def test_api_health_capabilities_projects_and_queue(tmp_path):
     assert capabilities.status_code == 200
     assert capabilities.json()["endpoints"]["api"] == "/api/v1"
     assert capabilities.json()["features"]["job_manager"] is True
+    assert capabilities.json()["features"]["async_generation"] is True
 
     projects = client.get("/api/v1/projects", params={"status": "PENDING"})
     assert projects.status_code == 200
@@ -64,6 +78,69 @@ def test_api_health_capabilities_projects_and_queue(tmp_path):
     queue = client.get("/api/v1/queue")
     assert queue.status_code == 200
     assert queue.json()["items"] == []
+
+
+def test_generate_api_returns_202_and_deduplicates_agent_retry(tmp_path):
+    workspace = tmp_path / "studio"
+    write_pending_project(workspace)
+    commands = FakeCommandService()
+    app = create_studio_app(
+        None,
+        workspace,
+        mount_ui=False,
+        command_service=commands,
+    )
+
+    with TestClient(app) as client:
+        headers = {"Idempotency-Key": "turn-42-video-a"}
+        body = {
+            "voice_name": "Narrator",
+            "voice_variant": "WARM",
+            "quality_preset": "BALANCED",
+            "sections": ["S01"],
+        }
+        first = client.post(
+            "/api/v1/projects/video-a/generate",
+            json=body,
+            headers=headers,
+        )
+        assert first.status_code == 202
+        first_job = first.json()["job_id"]
+        assert first.headers["location"] == f"/api/v1/jobs/{first_job}"
+
+        finished = wait_for_terminal(app.state.job_manager, first_job)
+        assert finished.status == "completed"
+        assert finished.result["project_status"] == "DONE"
+
+        second = client.post(
+            "/api/v1/projects/video-a/generate",
+            json={**body, "sections": ["S02"]},
+            headers=headers,
+        )
+        assert second.status_code == 202
+        assert second.json()["job_id"] == first_job
+        assert len(commands.calls) == 1
+        assert commands.calls[0]["project_id"] == "video-a"
+        assert commands.calls[0]["sections"] == ["S01"]
+        assert commands.calls[0]["project_path"].endswith("projects/video-a")
+
+
+def test_generate_api_rejects_missing_project_before_job_submission(tmp_path):
+    commands = FakeCommandService()
+    app = create_studio_app(
+        None,
+        tmp_path / "studio",
+        mount_ui=False,
+        command_service=commands,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/projects/missing/generate",
+            json={"voice_name": "Narrator"},
+        )
+        assert response.status_code == 404
+        assert app.state.job_manager.list_jobs() == []
+        assert commands.calls == []
 
 
 def test_job_api_exposes_persisted_job_and_events(tmp_path):
