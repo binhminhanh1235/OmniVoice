@@ -16,6 +16,7 @@ import torch
 from omnivoice import OmniVoice
 from omnivoice.cli import project_studio_quality as quality_module
 from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
+from omnivoice.cli.data_management_ui import build_data_management_demo
 from omnivoice.cli.generation_control_ui import build_generation_control_demo
 from omnivoice.cli.project_queue_ui import build_project_queue_demo
 from omnivoice.cli.project_studio_pause import PauseAwareQualityPresetProjectStudioController
@@ -65,6 +66,11 @@ def build_demo(model, workspace: str | Path):
         workspace,
         controller_cls=PauseAwareQualityPresetProjectStudioController,
     )
+    data_management = build_data_management_demo(
+        model,
+        workspace,
+        controller_cls=PauseAwareQualityPresetProjectStudioController,
+    )
     demo = gr.TabbedInterface(
         [
             text_doctor,
@@ -74,6 +80,7 @@ def build_demo(model, workspace: str | Path):
             project_queue,
             hardware,
             downloads,
+            data_management,
         ],
         [
             "1. Text Doctor",
@@ -83,6 +90,7 @@ def build_demo(model, workspace: str | Path):
             "5. Project Queue",
             "6. Hardware & Quality",
             "7. Section MP3 Downloads",
+            "8. Data Management",
         ],
         title="OmniVoice Project Studio",
     )
@@ -142,7 +150,7 @@ def main(argv=None) -> int:
     if runtime.environment == "kaggle":
         logger.warning(
             "Kaggle execution workspace is local/ephemeral. "
-            "Remote persistence is intentionally not configured in this phase."
+            "Remote persistence is optional and can be configured from the Data Management tab."
         )
 
     device = args.device or get_best_device()
