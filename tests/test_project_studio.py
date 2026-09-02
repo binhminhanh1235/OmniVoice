@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 
 from omnivoice import VoiceClonePrompt
+from omnivoice.cli.audio_download_ui import enable_audio_download_buttons
 from omnivoice.cli.project_studio import (
     ProjectStudioController,
     _split_section_ids,
@@ -91,6 +92,19 @@ def test_project_studio_parser_defaults():
     assert args.model == "k2-fsa/OmniVoice"
     assert args.asr_device == "cpu"
     assert args.port == 7860
+
+
+def test_audio_players_expose_download_control():
+    import gradio as gr
+
+    with gr.Blocks() as demo:
+        audio = gr.Audio(label="Test audio", type="filepath")
+
+    assert enable_audio_download_buttons(demo) == 1
+    if hasattr(audio, "buttons"):
+        assert "download" in audio.buttons
+    else:
+        assert audio.show_download_button is True
 
 
 def test_project_studio_gradio_build_smoke(tmp_path: Path):
