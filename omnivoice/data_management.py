@@ -22,6 +22,8 @@ from omnivoice.project_queue import ProjectQueueStore
 
 _DRIVE_REMOTE = "omnivoice_drive"
 _CREDENTIAL_FILE = "google-drive.json"
+_SECTION_STATUS_FILE = "section-status.json"
+_INFLIGHT_SECTION_STATES = {"queued", "generating"}
 _REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
@@ -61,6 +63,41 @@ def _validate_project_path(workspace: str | Path, project_path: str | Path) -> P
     return resolved
 
 
+def _normalise_projects(
+    workspace: str | Path,
+    selected: Iterable[str | Path],
+) -> list[Path]:
+    targets: list[Path] = []
+    seen: set[str] = set()
+    for item in selected:
+        path = _validate_project_path(workspace, item)
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append(path)
+    return targets
+
+
+def _inflight_sections(project_path: Path) -> list[str]:
+    status_path = project_path / _SECTION_STATUS_FILE
+    if not status_path.exists():
+        return []
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    records = payload.get("sections") or {}
+    if not isinstance(records, dict):
+        return []
+    return [
+        str(section_id)
+        for section_id, record in records.items()
+        if isinstance(record, dict)
+        and str(record.get("status") or "").lower() in _INFLIGHT_SECTION_STATES
+    ]
+
+
 def list_project_paths(workspace: str | Path) -> list[str]:
     root = _projects_root(workspace)
     items: list[str] = []
@@ -74,9 +111,20 @@ def delete_projects(
     workspace: str | Path,
     selected: Iterable[str | Path],
 ) -> DeleteProjectsResult:
-    targets = [_validate_project_path(workspace, item) for item in selected]
+    targets = _normalise_projects(workspace, selected)
     if not targets:
         raise ValueError("Select at least one project to delete")
+
+    inflight = [
+        f"{path.name} ({', '.join(section_ids)})"
+        for path in targets
+        if (section_ids := _inflight_sections(path))
+    ]
+    if inflight:
+        raise ValueError(
+            "Cannot delete project(s) with in-progress section generation: "
+            + "; ".join(inflight)
+        )
 
     target_set = {str(path) for path in targets}
     queue_store = ProjectQueueStore(workspace)
@@ -310,7 +358,7 @@ def sync_projects_to_drive(
     include_hardware_settings: bool = True,
     rclone_binary: Optional[str] = None,
 ) -> DriveSyncResult:
-    projects = [_validate_project_path(workspace, item) for item in selected]
+    projects = _normalise_projects(workspace, selected)
     if not projects:
         raise ValueError("Select at least one project to sync")
     destination = _normalise_destination(destination)
