@@ -6,6 +6,7 @@ on:
       - "omnivoice/adaptive_quality.py"
       - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
+      - "omnivoice/section_export.py"
       - "omnivoice/services/**"
       - "omnivoice/server/**"
       - "omnivoice/mcp_server.py"
@@ -32,6 +33,7 @@ on:
       - "omnivoice/cli/project_studio_quality.py"
       - "omnivoice/cli/project_studio_text_resume.py"
       - "omnivoice/cli/project_studio_voice_doctor.py"
+      - "omnivoice/cli/section_export_ui.py"
       - "omnivoice/cli/studio_server.py"
       - "omnivoice/cli/project_queue_ui.py"
       - "omnivoice/cli/section_history_ui.py"
@@ -83,6 +85,7 @@ on:
       - "tests/test_section_resume_controller.py"
       - "tests/test_section_history.py"
       - "tests/test_section_history_ui.py"
+      - "tests/test_section_export.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
       - "tests/test_preview.py"
@@ -122,6 +125,8 @@ on:
       - "feat/ai-native-sse-v1"
       - "feat/ai-native-mcp-v1"
       - "feat/stable-tunnel-v1"
+      - "fix/project-audio-write-self-heal"
+      - "feat/section-mp3-download"
 
 jobs:
   test:
@@ -178,6 +183,7 @@ jobs:
             tests/test_section_resume_controller.py \
             tests/test_section_history.py \
             tests/test_section_history_ui.py \
+            tests/test_section_export.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
             tests/test_preview.py \
