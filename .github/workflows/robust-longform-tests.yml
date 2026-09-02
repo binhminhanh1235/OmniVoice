@@ -61,6 +61,7 @@ on:
       - "tests/test_studio_service.py"
       - "tests/test_studio_server.py"
       - "tests/test_job_manager.py"
+      - "tests/test_studio_commands.py"
       - "tests/test_project_studio_quality.py"
       - "tests/test_text_doctor.py"
       - "tests/test_text_doctor_ui.py"
@@ -110,6 +111,7 @@ on:
       - "feat/kaggle-local-workspace"
       - "feat/ai-native-foundation-v1"
       - "feat/ai-native-jobs-v1"
+      - "feat/ai-native-write-api-v1"
 
 jobs:
   test:
@@ -149,6 +151,7 @@ jobs:
             tests/test_studio_service.py \
             tests/test_studio_server.py \
             tests/test_job_manager.py \
+            tests/test_studio_commands.py \
             tests/test_project_studio_quality.py \
             tests/test_text_doctor.py \
             tests/test_text_doctor_ui.py \
