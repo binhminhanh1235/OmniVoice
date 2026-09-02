@@ -94,17 +94,21 @@ def test_project_studio_parser_defaults():
     assert args.port == 7860
 
 
-def test_audio_players_expose_download_control():
+def test_audio_players_expose_download_control_across_tabs():
     import gradio as gr
 
-    with gr.Blocks() as demo:
-        audio = gr.Audio(label="Test audio", type="filepath")
+    with gr.Blocks() as first:
+        audio_one = gr.Audio(label="First audio", type="filepath")
+    with gr.Blocks() as second:
+        audio_two = gr.Audio(label="Second audio", type="filepath")
+    demo = gr.TabbedInterface([first, second], ["First", "Second"])
 
-    assert enable_audio_download_buttons(demo) == 1
-    if hasattr(audio, "buttons"):
-        assert "download" in audio.buttons
-    else:
-        assert audio.show_download_button is True
+    assert enable_audio_download_buttons(demo) == 2
+    for audio in (audio_one, audio_two):
+        if hasattr(audio, "buttons"):
+            assert "download" in audio.buttons
+        else:
+            assert audio.show_download_button is True
 
 
 def test_project_studio_gradio_build_smoke(tmp_path: Path):
