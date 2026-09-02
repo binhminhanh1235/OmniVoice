@@ -1,4 +1,5 @@
 import shutil
+import zipfile
 
 import numpy as np
 import pytest
@@ -6,7 +7,11 @@ import soundfile as sf
 
 from omnivoice.cli.section_export_ui import build_section_export_demo
 from omnivoice.project import OmniVoiceProject
-from omnivoice.section_export import export_section_mp3s, section_ids
+from omnivoice.section_export import (
+    create_section_mp3_archive,
+    export_section_mp3s,
+    section_ids,
+)
 
 
 SCRIPT = """# Export Demo
@@ -53,6 +58,32 @@ def test_export_selected_sections_to_mp3_and_reuse_cache(tmp_path):
     assert second.files == first.files
     assert second.reused == ("S01",)
     assert second.skipped == ()
+
+
+def test_download_all_archive_contains_only_selected_project_mp3s(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    export_dir = project.root / "exports" / "mp3"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    first = export_dir / "S01.mp3"
+    second = export_dir / "S02.mp3"
+    first.write_bytes(b"fake-mp3-one")
+    second.write_bytes(b"fake-mp3-two")
+
+    archive = create_section_mp3_archive(project, [first, second])
+    assert archive.exists()
+    assert archive.name == f"{project.root.name}-selected-sections.zip"
+    with zipfile.ZipFile(archive) as bundle:
+        assert bundle.namelist() == ["S01.mp3", "S02.mp3"]
+        assert bundle.read("S01.mp3") == b"fake-mp3-one"
+        assert bundle.read("S02.mp3") == b"fake-mp3-two"
+
+    with pytest.raises(ValueError, match="At least two"):
+        create_section_mp3_archive(project, [first])
+
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"not-project-audio")
+    with pytest.raises(ValueError, match="outside project MP3 exports"):
+        create_section_mp3_archive(project, [first, outside])
 
 
 def test_export_rejects_empty_or_unknown_selection(tmp_path):
