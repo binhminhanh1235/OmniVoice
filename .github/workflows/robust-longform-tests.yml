@@ -5,6 +5,7 @@ on:
     paths:
       - "omnivoice/adaptive_quality.py"
       - "omnivoice/data_management.py"
+      - "omnivoice/runtime_rclone.py"
       - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
       - "omnivoice/section_export.py"
