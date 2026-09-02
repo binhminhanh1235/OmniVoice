@@ -1,6 +1,6 @@
 # OmniVoice Project Studio roadmap
 
-This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SSD first, then persistence, speed and production convenience.
+This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SSD first, then an AI-native service layer while keeping the Gradio web UI.
 
 ## P0 — usable project workflow
 
@@ -67,33 +67,53 @@ This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SS
 7. [ ] Same-language reference selection when one voice has multiple language variants.
 8. [ ] Benchmark acceleration options such as FlashInfer/CUDA graphs before enabling them by default.
 
+## P2.5 — AI-native OmniVoice while keeping Web UI
+
+The Gradio UI remains a first-class interface. AI-native clients use the same application services rather than duplicating generation logic.
+
+1. [x] Protocol-neutral `StudioService` application layer for runtime, projects, queue and capabilities.
+2. [x] Unified FastAPI server with Gradio mounted at `/ui`.
+3. [x] Read-only REST/OpenAPI foundation: `/health`, `/api/v1/capabilities`, `/api/v1/hardware`, projects and queue summaries.
+4. [ ] Async single-GPU Job Manager with persisted job state and cooperative cancellation/pause boundaries.
+5. [ ] Write REST API for preview, generate, queue, regenerate and merge using job IDs instead of long blocking requests.
+6. [ ] Job event stream (SSE) for section/chunk progress.
+7. [ ] MCP server mounted at `/mcp` using the same service/job layer.
+8. [ ] Stable hostname publishing path using a named tunnel; ChatGPT/Claude/Antigravity must never depend on random `*.gradio.live` URLs.
+9. [ ] API authentication/scopes independent from Gradio UI auth.
+10. [ ] Universal OmniVoice Skill describing safe production workflows and quality rules.
+11. [ ] Thin adapters/examples for ChatGPT, Claude Code and Antigravity.
+12. [ ] Optional persistent control plane + worker registry for reconnecting Kaggle/Colab workers without changing client configuration.
+
 ## P3 — authoring and production tools
 
 1. [ ] Rich directive DSL (`PAUSE`, `SLOW`, `FAST`, `PITCH`, `VOICE`, combined tags).
 2. [ ] Per-line and phrase-level style overrides.
 3. [ ] Timeline and silence editor.
 4. [ ] WAV/MP3 export profiles.
-5. [ ] Project CLI runner / HTTP API.
+5. [ ] Project CLI runner for unattended local workflows.
 
 ## Next priority
 
-Validate the **Kaggle local execution path** in a real Kaggle GPU notebook before adding remote persistence.
-
-The runtime contract is deliberately simple:
+Finish and validate the **AI-native server foundation** while preserving the existing Gradio workflow.
 
 ```text
-/kaggle/input
-    read-only sources
-          ↓
-/kaggle/working/OmniVoiceStudio
-    local execution workspace
-          ↓
-Project / Queue / section-status.json / WAV outputs
+                       OmniVoice Studio
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+           /ui             /api/v1           /mcp
+         Gradio              REST           planned
+             │                │                │
+             └──────── Application Services ──┘
+                              │
+                   Project / Queue / Voice
+                              │
+                         OmniVoice Core
 ```
 
-Google Drive or another persistent backend will later attach at an explicit sync/export boundary. It must not become the filesystem used by the generation hot path.
+After the read-only server foundation is CI-green, the next implementation target is the **single-GPU async Job Manager**. Generation/preview/stability work must be serialized on one Kaggle GPU and exposed as jobs rather than long-lived HTTP requests.
 
-After Kaggle local execution is stable, the next optimization target is reusable preprocessing / verification caching. The cache must never mark newly generated audio as verified merely because an older candidate with the same text once passed; generated-audio verification remains tied to the audio fingerprint.
+The stable public hostname is implemented after the server/job contract is stable. ChatGPT, Claude and Antigravity will then configure one permanent MCP URL while Kaggle/Colab sessions may change underneath it.
 
 ## Architectural rule
 
