@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "omnivoice/adaptive_quality.py"
+      - "omnivoice/data_management.py"
       - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
       - "omnivoice/section_export.py"
@@ -24,6 +25,7 @@ on:
       - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
       - "omnivoice/style_bank.py"
+      - "omnivoice/cli/data_management_ui.py"
       - "omnivoice/cli/demo_robust.py"
       - "omnivoice/cli/project_studio.py"
       - "omnivoice/cli/project_studio_plus.py"
@@ -48,6 +50,7 @@ on:
       - "docs/project-queue.md"
       - "docs/hardware-quality-presets.md"
       - "docs/kaggle-local-workspace.md"
+      - "docs/data-management.md"
       - "docs/ai-native-foundation.md"
       - "docs/ai-native-sse.md"
       - "docs/ai-native-mcp.md"
@@ -63,6 +66,7 @@ on:
       - "docs/voice-stability-score.md"
       - "docs/auto-reference-segment.md"
       - "tests/test_adaptive_quality.py"
+      - "tests/test_data_management.py"
       - "tests/test_hardware_quality.py"
       - "tests/test_runtime_workspace.py"
       - "tests/test_studio_service.py"
@@ -127,6 +131,8 @@ on:
       - "feat/stable-tunnel-v1"
       - "fix/project-audio-write-self-heal"
       - "feat/section-mp3-download"
+      - "feat/section-download-all"
+      - "feat/data-management-drive-sync"
 
 jobs:
   test:
@@ -161,6 +167,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_adaptive_quality.py \
+            tests/test_data_management.py \
             tests/test_hardware_quality.py \
             tests/test_runtime_workspace.py \
             tests/test_studio_service.py \
