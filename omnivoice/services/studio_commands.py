@@ -31,6 +31,7 @@ class StudioCommandService:
     ) -> None:
         self.model = model
         self.workspace = Path(workspace).expanduser().resolve()
+        self.projects_root = (self.workspace / "projects").resolve()
         if controller is None:
             # Temporary adapter around the mature Project Studio controller.
             # Keeping this import here prevents REST/MCP layers from depending
@@ -55,11 +56,20 @@ class StudioCommandService:
         selected_set = set(selected)
         return [section_id for section_id in available if section_id in selected_set]
 
+    def _validated_project_path(self, value: Any) -> Path:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError("project_path is required")
+        project_path = Path(raw).expanduser().resolve()
+        if project_path.parent != self.projects_root:
+            raise ValueError("project_path must be a direct child of the Studio projects directory")
+        if not (project_path / "project.json").exists():
+            raise ValueError("project_path does not contain a Studio project")
+        return project_path
+
     def generate_project_job(self, ctx: JobContext) -> dict[str, Any]:
         payload = ctx.payload
-        project_path = Path(str(payload.get("project_path") or "")).expanduser()
-        if not project_path:
-            raise ValueError("project_path is required")
+        project_path = self._validated_project_path(payload.get("project_path"))
 
         project = self.controller.load_project(project_path)
         settings = self.controller.load_project_settings(project)
