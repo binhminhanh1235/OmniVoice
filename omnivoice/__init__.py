@@ -94,6 +94,13 @@ from omnivoice.robust_longform import (
     RobustLongFormResult,
     generate_robust_longform,
 )
+from omnivoice.runtime_workspace import (
+    RuntimeWorkspace,
+    default_execution_workspace,
+    detect_runtime_environment,
+    detect_runtime_workspace,
+    ensure_runtime_workspace,
+)
 from omnivoice.section_history import (
     HISTORY_DIR_NAME,
     HISTORY_INDEX_NAME,
@@ -161,6 +168,11 @@ __all__ = [
     "normalize_quality_preset",
     "quality_policy",
     "quality_preset_rows",
+    "RuntimeWorkspace",
+    "detect_runtime_environment",
+    "detect_runtime_workspace",
+    "default_execution_workspace",
+    "ensure_runtime_workspace",
     "OmniVoiceProject",
     "ProjectManifest",
     "ProjectSection",
