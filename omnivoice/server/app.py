@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -13,9 +14,11 @@ from typing import Any, Optional
 
 from omnivoice.runtime_workspace import RuntimeWorkspace
 from omnivoice.server.schemas import GenerateProjectRequest
-from omnivoice.services.job_manager import StudioJobManager
+from omnivoice.services.job_manager import JobEvent, StudioJobManager
 from omnivoice.services.studio_commands import StudioCommandService
 from omnivoice.services.studio_service import StudioService
+
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
 
 
 def _job_payload(job, *, include_events: bool = False) -> dict[str, Any]:
@@ -23,6 +26,18 @@ def _job_payload(job, *, include_events: bool = False) -> dict[str, Any]:
     if not include_events:
         payload.pop("events", None)
     return payload
+
+
+def _sse_event(event: JobEvent) -> str:
+    payload = {
+        "seq": event.seq,
+        "timestamp": event.timestamp,
+        "message": event.message,
+        "progress": event.progress,
+        "data": event.data,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"id: {event.seq}\nevent: {event.event}\ndata: {encoded}\n\n"
 
 
 def create_studio_app(
@@ -34,7 +49,7 @@ def create_studio_app(
     command_service: Optional[StudioCommandService] = None,
 ):
     from fastapi import FastAPI, Header, HTTPException, Query
-    from fastapi.responses import JSONResponse, RedirectResponse
+    from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
@@ -51,10 +66,10 @@ def create_studio_app(
 
     app = FastAPI(
         title="OmniVoice Studio API",
-        version="0.3.0",
+        version="0.4.0",
         description=(
             "Machine-facing API for OmniVoice Studio with persistent single-GPU "
-            "jobs and resumable project generation."
+            "jobs, resumable project generation, and live SSE progress."
         ),
         lifespan=lifespan,
     )
@@ -74,7 +89,9 @@ def create_studio_app(
         payload = service.capabilities()
         payload["features"]["job_manager"] = True
         payload["features"]["async_generation"] = True
+        payload["features"]["sse_job_stream"] = True
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
+        payload["endpoints"]["job_stream"] = "/api/v1/jobs/{job_id}/stream"
         payload["endpoints"]["generate_project"] = (
             "/api/v1/projects/{project_id}/generate"
         )
@@ -173,6 +190,55 @@ def create_studio_app(
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Job not found") from exc
+
+    @app.get("/api/v1/jobs/{job_id}/stream", tags=["jobs"])
+    def stream_job_events(
+        job_id: str,
+        after: int = Query(default=0, ge=0),
+        last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+    ):
+        try:
+            jobs.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Job not found") from exc
+
+        cursor = int(after)
+        if last_event_id is not None and str(last_event_id).strip():
+            try:
+                cursor = max(cursor, int(str(last_event_id).strip()))
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Last-Event-ID must be an integer event sequence.",
+                ) from exc
+        if cursor < 0:
+            raise HTTPException(status_code=400, detail="Event cursor cannot be negative")
+
+        def event_stream():
+            current = cursor
+            while True:
+                events, job = jobs.wait_for_events(job_id, current, timeout=15.0)
+                if events:
+                    for event in events:
+                        current = event.seq
+                        yield _sse_event(event)
+                    if job.status in _TERMINAL_JOB_STATUSES:
+                        return
+                    continue
+
+                if job.status in _TERMINAL_JOB_STATUSES:
+                    return
+                yield ": keep-alive\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/api/v1/jobs/{job_id}/cancel", tags=["jobs"])
     def cancel_job(job_id: str):
