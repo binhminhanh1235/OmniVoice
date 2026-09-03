@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "omnivoice/adaptive_quality.py"
+      - "omnivoice/benchmark.py"
       - "omnivoice/data_management.py"
       - "omnivoice/runtime_rclone.py"
       - "omnivoice/hardware_quality.py"
@@ -26,6 +27,7 @@ on:
       - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
       - "omnivoice/style_bank.py"
+      - "omnivoice/cli/benchmark.py"
       - "omnivoice/cli/data_management_ui.py"
       - "omnivoice/cli/demo_robust.py"
       - "omnivoice/cli/project_studio.py"
@@ -66,6 +68,7 @@ on:
       - "docs/voice-doctor.md"
       - "docs/voice-stability-score.md"
       - "docs/auto-reference-segment.md"
+      - "tests/test_benchmark.py"
       - "tests/test_adaptive_quality.py"
       - "tests/test_data_management.py"
       - "tests/test_hardware_quality.py"
@@ -108,6 +111,7 @@ on:
       - ".github/workflows/robust-longform-tests.yml"
   push:
     branches:
+      - "optimize"
       - "fix/robust-longform-tts"
       - "fix/gradio-robust-longform"
       - "fix/project-studio-generate-diagnostics"
@@ -167,6 +171,7 @@ jobs:
       - name: Run robust long-form and project tests
         run: |
           pytest -q \
+            tests/test_benchmark.py \
             tests/test_adaptive_quality.py \
             tests/test_data_management.py \
             tests/test_hardware_quality.py \
