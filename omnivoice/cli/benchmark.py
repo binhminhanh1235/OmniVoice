@@ -22,6 +22,7 @@ from omnivoice.benchmark import (
 )
 from omnivoice.hardware_quality import QUALITY_PRESETS, quality_policy
 from omnivoice.models.omnivoice import OmniVoice, VoiceClonePrompt
+from omnivoice.optimized_inference import OptimizedOmniVoice
 from omnivoice.utils.common import get_best_device
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language", default="en")
     parser.add_argument("--preset", choices=QUALITY_PRESETS, default="BALANCED")
     parser.add_argument("--num-step", type=int, default=None)
+    parser.add_argument(
+        "--engine",
+        choices=("baseline", "target-only"),
+        default="baseline",
+        help=(
+            "baseline uses the stable decoder; target-only projects audio logits only "
+            "for target positions and delays fp32 conversion until after slicing."
+        ),
+    )
     parser.add_argument(
         "--text",
         action="append",
@@ -65,6 +75,10 @@ def _format_optional(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1f}"
 
 
+def _model_class(engine: str):
+    return OptimizedOmniVoice if engine == "target-only" else OmniVoice
+
+
 def main(argv=None) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -72,10 +86,11 @@ def main(argv=None) -> int:
     )
     args = build_parser().parse_args(argv)
     device = str(args.device or get_best_device())
+    model_cls = _model_class(args.engine)
 
-    logger.info("Loading model=%s on %s", args.model, device)
+    logger.info("Loading model=%s engine=%s on %s", args.model, args.engine, device)
     load_started = time.perf_counter()
-    model = OmniVoice.from_pretrained(
+    model = model_cls.from_pretrained(
         args.model,
         device_map=device,
         dtype=_dtype_for(device),
@@ -107,9 +122,7 @@ def main(argv=None) -> int:
     )
     summary = summarize_results(results)
 
-    print(
-        "sample rep chars words elapsed_s audio_s rtf peak_cuda_mb"
-    )
+    print("sample rep chars words elapsed_s audio_s rtf peak_cuda_mb")
     for item in results:
         print(
             f"{item.sample:>6} {item.repetition:>3} {item.text_chars:>5} "
@@ -118,6 +131,7 @@ def main(argv=None) -> int:
             f"{_format_optional(item.peak_cuda_memory_mb):>12}"
         )
     print()
+    print(f"engine={args.engine}")
     print(f"model_load_seconds={model_load_seconds:.3f}")
     print(f"weighted_rtf={summary.weighted_rtf:.4f}")
     print(f"median_rtf={summary.median_rtf:.4f}")
@@ -133,6 +147,7 @@ def main(argv=None) -> int:
         output.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "model": args.model,
+            "engine": args.engine,
             "device": device,
             "language": args.language,
             "preset": args.preset,
