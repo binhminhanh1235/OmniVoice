@@ -23,6 +23,7 @@ on:
       - "omnivoice/section_history.py"
       - "omnivoice/robust_longform.py"
       - "omnivoice/project.py"
+      - "omnivoice/project_narration.py"
       - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
       - "omnivoice/style_bank.py"
@@ -93,6 +94,7 @@ on:
       - "tests/test_section_export.py"
       - "tests/test_robust_longform.py"
       - "tests/test_project.py"
+      - "tests/test_project_narration.py"
       - "tests/test_preview.py"
       - "tests/test_voice_library.py"
       - "tests/test_style_bank.py"
@@ -194,6 +196,7 @@ jobs:
             tests/test_section_export.py \
             tests/test_robust_longform.py \
             tests/test_project.py \
+            tests/test_project_narration.py \
             tests/test_preview.py \
             tests/test_voice_library.py \
             tests/test_style_bank.py \
