@@ -39,7 +39,9 @@ from omnivoice.utils.lang_map import LANG_NAMES, lang_display_name
 # ---------------------------------------------------------------------------
 # Language list — all 600+ supported languages
 # ---------------------------------------------------------------------------
-_ALL_LANGUAGES = ["Auto"] + sorted(lang_display_name(n) for n in LANG_NAMES)
+_ALL_LANGUAGES = ["English", "Auto"] + sorted(
+    lang_display_name(name) for name in LANG_NAMES if name != "english"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +233,7 @@ def build_demo(
     """
 
     # Reusable: language dropdown component
-    def _lang_dropdown(label="Language (optional) / 语种 (可选)", value="Auto"):
+    def _lang_dropdown(label="Language (optional) / 语种 (可选)", value="English"):
         return gr.Dropdown(
             label=label,
             choices=_ALL_LANGUAGES,

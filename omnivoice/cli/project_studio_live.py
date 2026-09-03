@@ -26,6 +26,7 @@ import torch
 from omnivoice import OmniVoice
 from omnivoice.cli.project_studio import (
     ProjectStudioController,
+    _LANGUAGE_CHOICES,
     build_demo as build_project_demo,
     default_workspace,
 )
@@ -543,7 +544,14 @@ def build_live_generate_demo(model: Any, workspace: str | Path):
                 choices=initial_variants,
                 value=("AUTO" if initial_variants else None),
             )
-            language = gr.Textbox(label="Language", value="en")
+            language = gr.Dropdown(
+                label="Language",
+                choices=_LANGUAGE_CHOICES,
+                value="en",
+                allow_custom_value=False,
+                interactive=True,
+                info="English is first; select another supported language when needed.",
+            )
 
         sections = gr.Textbox(
             label="Sections (optional)",
