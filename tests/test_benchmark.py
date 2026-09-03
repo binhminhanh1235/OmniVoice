@@ -6,6 +6,12 @@ from omnivoice.benchmark import (
     benchmark_generate,
     summarize_results,
 )
+from omnivoice.cli.project_studio_voice_doctor import (
+    _should_eager_load_asr as project_studio_should_eager_load_asr,
+)
+from omnivoice.cli.studio_server import (
+    _should_eager_load_asr as studio_server_should_eager_load_asr,
+)
 
 
 class FakeModel:
@@ -81,3 +87,18 @@ def test_benchmark_generate_validates_arguments():
         benchmark_generate(model, ["hello"], warmup=-1)
     with pytest.raises(ValueError, match="repeat"):
         benchmark_generate(model, ["hello"], repeat=0)
+
+
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [
+        ("cpu", False),
+        ("CPU", False),
+        ("cuda", True),
+        ("cuda:1", True),
+        ("xpu:0", True),
+    ],
+)
+def test_studio_launchers_only_eager_load_accelerator_asr(device, expected):
+    assert project_studio_should_eager_load_asr(device) is expected
+    assert studio_server_should_eager_load_asr(device) is expected
