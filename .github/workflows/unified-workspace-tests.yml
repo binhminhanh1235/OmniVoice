@@ -1,0 +1,45 @@
+name: Unified Project Workspace tests
+
+on:
+  pull_request:
+    paths:
+      - "omnivoice/cli/project_workspace.py"
+      - "omnivoice/cli/unified_controller.py"
+      - "omnivoice/cli/project_studio_voice_doctor.py"
+      - "omnivoice/project_narration.py"
+      - "tests/test_project_workspace.py"
+      - "tests/test_project_settings_merge.py"
+      - "tests/test_project_narration.py"
+      - ".github/workflows/unified-workspace-tests.yml"
+  push:
+    branches:
+      - "feat/unified-project-workspace-ui"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Compile UI sources
+        run: |
+          python -m py_compile \
+            omnivoice/cli/project_workspace.py \
+            omnivoice/cli/unified_controller.py \
+            omnivoice/cli/project_studio_voice_doctor.py
+      - name: Run workspace regression tests
+        run: |
+          pytest -q \
+            tests/test_project_narration.py \
+            tests/test_project_workspace.py \
+            tests/test_project_settings_merge.py
