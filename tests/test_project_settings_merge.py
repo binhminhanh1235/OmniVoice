@@ -1,6 +1,7 @@
 import json
 
 from omnivoice.cli.unified_controller import UnifiedWorkspaceController
+from omnivoice.project_narration import create_narration_project
 
 
 SCRIPT = """
@@ -32,3 +33,18 @@ def test_generation_settings_do_not_erase_project_narration_options(tmp_path):
     assert payload["voice_name"] == "Narrator"
     assert payload["voice_variant"] == "AUTO"
     assert payload["quality_preset"] == "BALANCED"
+
+
+def test_legacy_title_project_is_inferred_and_backfilled(tmp_path):
+    project = create_narration_project(
+        SCRIPT,
+        tmp_path / "projects" / "legacy",
+        speak_section_titles=True,
+    )
+    controller = UnifiedWorkspaceController(object(), tmp_path)
+
+    settings = controller.load_project_settings(project)
+
+    assert settings["speak_section_titles"] is True
+    persisted = json.loads((project.root / "studio.json").read_text(encoding="utf-8"))
+    assert persisted["speak_section_titles"] is True
