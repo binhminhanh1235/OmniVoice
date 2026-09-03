@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from omnivoice.cli.project_studio_advanced import AdvancedSettingsProjectStudioController
 from omnivoice.project import OmniVoiceProject
@@ -22,6 +22,14 @@ _GENERATION_SETTING_KEYS = {
 }
 
 
+def _manifest_speaks_section_titles(project: OmniVoiceProject) -> bool:
+    return any(
+        section.beats
+        and "SECTION_TITLE" in section.beats[0].directives
+        for section in project.manifest.sections
+    )
+
+
 class UnifiedWorkspaceController(AdvancedSettingsProjectStudioController):
     """Keep project-shaping metadata stable across later render settings saves.
 
@@ -29,6 +37,17 @@ class UnifiedWorkspaceController(AdvancedSettingsProjectStudioController):
     unified UI stores project-shaping choices such as ``speak_section_titles``
     there too, so generation must preserve non-generation keys.
     """
+
+    def load_project_settings(self, project: OmniVoiceProject) -> dict[str, Any]:
+        payload = super().load_project_settings(project)
+        if "speak_section_titles" not in payload:
+            inferred = _manifest_speaks_section_titles(project)
+            payload["speak_section_titles"] = inferred
+            if inferred:
+                # Backfill only when the manifest gives positive evidence. This
+                # upgrades projects created by the earlier title-option UI.
+                self._write_project_settings_payload(project, payload)
+        return payload
 
     def _merge_project_metadata(
         self,
