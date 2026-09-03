@@ -28,11 +28,20 @@ from omnivoice.project import OmniVoiceProject, parse_project_script
 from omnivoice.robust_longform import RobustLongFormConfig
 from omnivoice.style_bank import StyleBankProjectRunner
 from omnivoice.utils.common import get_best_device
+from omnivoice.utils.lang_map import LANG_NAME_TO_ID, lang_display_name
 from omnivoice.voice_library import VoiceLibrary
 
 logger = logging.getLogger(__name__)
 
 _STUDIO_SETTINGS = "studio.json"
+_LANGUAGE_CHOICES = [("English", "en")] + sorted(
+    (
+        (lang_display_name(name), language_id)
+        for name, language_id in LANG_NAME_TO_ID.items()
+        if name != "english"
+    ),
+    key=lambda item: item[0],
+)
 
 
 def default_workspace() -> Path:
@@ -547,7 +556,14 @@ def build_demo(model: Any, workspace: str | Path):
             with gr.Row():
                 voice_name = gr.Textbox(label="Voice name", placeholder="Warm American Male")
                 voice_variant_new = gr.Textbox(label="Variant", value="DEFAULT")
-                voice_language_new = gr.Textbox(label="Language", value="en")
+                voice_language_new = gr.Dropdown(
+                    label="Language",
+                    choices=_LANGUAGE_CHOICES,
+                    value="en",
+                    allow_custom_value=False,
+                    interactive=True,
+                    info="English is first; select the reference language.",
+                )
             reference_audio = gr.Audio(label="Reference audio (3–10s)", type="filepath")
             reference_text = gr.Textbox(
                 label="Exact reference transcript (recommended)",
@@ -591,7 +607,14 @@ def build_demo(model: Any, workspace: str | Path):
                     choices=initial_variants,
                     value=("AUTO" if initial_variants else None),
                 )
-                language = gr.Textbox(label="Language", value="en")
+                language = gr.Dropdown(
+                    label="Language",
+                    choices=_LANGUAGE_CHOICES,
+                    value="en",
+                    allow_custom_value=False,
+                    interactive=True,
+                    info="English is first; select another supported language when needed.",
+                )
             sections = gr.Textbox(
                 label="Sections (optional)",
                 placeholder="S03,S07,S10 - empty means all",
