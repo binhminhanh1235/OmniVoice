@@ -10,8 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+from omnivoice.cli.project_studio import ProjectStudioController
 from omnivoice.cli.project_studio_advanced import AdvancedSettingsProjectStudioController
 from omnivoice.project import OmniVoiceProject
+from omnivoice.section_status import ensure_section_status
 
 
 _GENERATION_SETTING_KEYS = {
@@ -65,11 +67,17 @@ class UnifiedWorkspaceController(AdvancedSettingsProjectStudioController):
         speak_section_titles: bool = False,
         overwrite: bool = False,
     ) -> OmniVoiceProject:
-        project = super().create_project(
+        # SectionResumeProjectStudioController predates the narration option and
+        # narrows create_project() to overwrite-only. Call the title-aware base
+        # creator directly, then apply the resume sidecar initialization that
+        # the legacy override normally adds.
+        project = ProjectStudioController.create_project(
+            self,
             script,
             speak_section_titles=speak_section_titles,
             overwrite=overwrite,
         )
+        ensure_section_status(project)
         self._merge_project_metadata(
             project,
             speak_section_titles=bool(speak_section_titles),
