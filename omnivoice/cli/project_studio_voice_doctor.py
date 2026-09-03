@@ -134,13 +134,19 @@ def build_parser() -> argparse.ArgumentParser:
         default="cpu",
         help=(
             "ASR device. A single T4 usually keeps ASR on cpu; dual-T4 Kaggle can "
-            "dedicate cuda:1 to ASR."
+            "dedicate cuda:1 to ASR. CPU ASR is loaded lazily on first verification."
         ),
     )
     parser.add_argument("--ip", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true", default=False)
     return parser
+
+
+def _should_eager_load_asr(device: str) -> bool:
+    """Keep dedicated accelerator ASR eager while removing CPU ASR from startup."""
+
+    return str(device).lower().startswith(("cuda", "xpu"))
 
 
 def main(argv=None) -> int:
@@ -169,20 +175,28 @@ def main(argv=None) -> int:
     logger.info("Hardware: %s", hardware.summary())
     for note in hardware.notes:
         logger.info("Hardware note: %s", note)
+
+    eager_asr = _should_eager_load_asr(args.asr_device)
     logger.info(
-        "Loading OmniVoice model=%s device=%s asr_device=%s",
+        "Loading OmniVoice model=%s device=%s asr_device=%s asr_startup=%s",
         args.model,
         device,
         args.asr_device,
+        "eager" if eager_asr else "lazy",
     )
     model = OmniVoice.from_pretrained(
         args.model,
         device_map=device,
         dtype=torch.float16,
-        load_asr=True,
+        load_asr=eager_asr,
         asr_model_name=args.asr_model,
         asr_device=args.asr_device,
     )
+    if not eager_asr:
+        logger.info(
+            "CPU ASR deferred until the first transcription/verification request; Studio UI can start without loading Whisper."
+        )
+
     demo = build_demo(model, workspace)
     demo.queue().launch(
         server_name=args.ip,
