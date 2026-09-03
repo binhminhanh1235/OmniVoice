@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import torch
 
 from omnivoice.benchmark import (
     BenchmarkSampleResult,
@@ -12,6 +13,7 @@ from omnivoice.cli.project_studio_voice_doctor import (
 from omnivoice.cli.studio_server import (
     _should_eager_load_asr as studio_server_should_eager_load_asr,
 )
+from omnivoice.optimized_inference import gather_target_hidden_states
 
 
 class FakeModel:
@@ -102,3 +104,40 @@ def test_benchmark_generate_validates_arguments():
 def test_studio_launchers_only_eager_load_accelerator_asr(device, expected):
     assert project_studio_should_eager_load_asr(device) is expected
     assert studio_server_should_eager_load_asr(device) is expected
+
+
+def test_target_hidden_gather_matches_full_projection_at_used_positions():
+    torch.manual_seed(7)
+    batch_size = 2
+    sequence = 8
+    hidden_size = 6
+    output_size = 9
+    hidden = torch.randn(2 * batch_size, sequence, hidden_size)
+    projection = torch.nn.Linear(hidden_size, output_size, bias=False)
+    c_lens = [8, 6]
+    target_lens = [3, 2]
+
+    full_logits = projection(hidden)
+    gathered = gather_target_hidden_states(hidden, c_lens, target_lens)
+    target_logits = projection(gathered)
+
+    for index, (c_len, target_len) in enumerate(zip(c_lens, target_lens)):
+        assert torch.allclose(
+            target_logits[index, :target_len],
+            full_logits[index, c_len - target_len : c_len],
+        )
+        assert torch.allclose(
+            target_logits[batch_size + index, :target_len],
+            full_logits[batch_size + index, :target_len],
+        )
+
+
+def test_target_hidden_gather_validates_shapes():
+    hidden = torch.randn(4, 8, 6)
+
+    with pytest.raises(ValueError, match="aligned"):
+        gather_target_hidden_states(hidden, [8, 7], [3])
+    with pytest.raises(ValueError, match="conditional"):
+        gather_target_hidden_states(hidden[:3], [8, 7], [3, 2])
+    with pytest.raises(ValueError, match="invalid lengths"):
+        gather_target_hidden_states(hidden, [8, 1], [3, 2])
