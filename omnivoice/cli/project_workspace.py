@@ -5,15 +5,14 @@
 
 """Unified project-first workspace for long-form narration.
 
-This UI keeps the existing generation/controllers intact while presenting the
-workflow the way a narrator works: Script -> Preview -> Render -> Review ->
-Export.  Project selection is visible and shared across the page, sections are
-selected from a checklist instead of typed as comma-separated IDs, and common
-recovery actions live beside the audio they affect.
+The existing generation, verification, checkpoint/resume and quality services
+stay untouched. This module only changes the interaction model to follow the
+production flow: Script -> Voice/Preview -> Render -> Review -> Export.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -25,10 +24,10 @@ def _section_labels(project: Any) -> list[str]:
     for section in project.manifest.sections:
         chunks = [chunk for beat in section.beats for chunk in beat.chunks]
         verified = sum(chunk.status == "verified" for chunk in chunks)
-        state = section.status.upper()
         title = section.title or "Untitled section"
         labels.append(
-            f"{section.id} · {title} · {verified}/{len(chunks)} verified · {state}"
+            f"{section.id} · {title} · {verified}/{len(chunks)} verified · "
+            f"{section.status.upper()}"
         )
     return labels
 
@@ -36,12 +35,17 @@ def _section_labels(project: Any) -> list[str]:
 def _section_ids(values: Optional[Iterable[str]]) -> Optional[list[str]]:
     if not values:
         return None
-    ids: list[str] = []
+    output: list[str] = []
     for value in values:
         section_id = str(value).split(" · ", 1)[0].strip().upper()
-        if section_id and section_id not in ids:
-            ids.append(section_id)
-    return ids or None
+        if section_id and section_id not in output:
+            output.append(section_id)
+    return output or None
+
+
+def _labels_for_ids(labels: list[str], section_ids: Iterable[str]) -> list[str]:
+    wanted = {item.upper() for item in section_ids}
+    return [label for label in labels if label.split(" · ", 1)[0] in wanted]
 
 
 def _chunk_labels(project: Any, section_id: Optional[str] = None) -> list[str]:
@@ -67,13 +71,13 @@ def _chunk_target(value: str) -> tuple[str, str]:
 
 
 def _project_summary(project: Any, settings: dict[str, Any]) -> str:
-    total = 0
-    verified = 0
-    for section in project.manifest.sections:
-        for beat in section.beats:
-            for chunk in beat.chunks:
-                total += 1
-                verified += chunk.status == "verified"
+    chunks = [
+        chunk
+        for section in project.manifest.sections
+        for beat in section.beats
+        for chunk in beat.chunks
+    ]
+    verified = sum(chunk.status == "verified" for chunk in chunks)
     voice = settings.get("voice_name") or "not selected"
     variant = settings.get("voice_variant") or "AUTO"
     quality = settings.get("quality_preset") or "workspace default"
@@ -81,10 +85,24 @@ def _project_summary(project: Any, settings: dict[str, Any]) -> str:
     return (
         f"### {project.manifest.title}\n"
         f"**{len(project.manifest.sections)} sections** · "
-        f"**{verified}/{total} chunks verified** · "
+        f"**{verified}/{len(chunks)} chunks verified** · "
         f"Voice **{voice}/{variant}** · Quality **{quality}** · "
         f"Read titles **{titles}**"
     )
+
+
+def _generated_section_ids(project: Any) -> list[str]:
+    return [
+        section.id
+        for section in project.manifest.sections
+        if section.audio_file and (project.root / section.audio_file).exists()
+    ]
+
+
+def _effective_quality(controller: Any, project: Any) -> Optional[str]:
+    if hasattr(controller, "project_quality_preset"):
+        return controller.project_quality_preset(project)[0]
+    return None
 
 
 def build_project_workspace_demo(
@@ -99,10 +117,35 @@ def build_project_workspace_demo(
     projects = controller.list_projects()
     voices = controller.voices.voice_names()
     initial_project = projects[0] if projects else None
-    initial_voice = voices[0] if voices else None
+
+    initial_loaded = controller.load_project(initial_project) if initial_project else None
+    initial_settings = (
+        controller.load_project_settings(initial_loaded) if initial_loaded else {}
+    )
+    saved_voice = initial_settings.get("voice_name")
+    initial_voice = saved_voice if saved_voice in voices else (voices[0] if voices else None)
     initial_variants = (
         controller.voices.variant_choices(initial_voice) if initial_voice else []
     )
+    saved_variant = initial_settings.get("voice_variant")
+    initial_variant = (
+        saved_variant
+        if saved_variant in initial_variants
+        else ("AUTO" if "AUTO" in initial_variants else (initial_variants[0] if initial_variants else None))
+    )
+
+    def _voice_updates(settings: dict[str, Any]):
+        voice_name = settings.get("voice_name")
+        if voice_name not in controller.voices.voice_names():
+            voice_name = None
+        variants = controller.voices.variant_choices(voice_name) if voice_name else []
+        variant_name = settings.get("voice_variant")
+        if variant_name not in variants:
+            variant_name = "AUTO" if "AUTO" in variants else (variants[0] if variants else None)
+        return (
+            gr.update(choices=controller.voices.voice_names(), value=voice_name),
+            gr.update(choices=variants, value=variant_name),
+        )
 
     def load_state(project_path: Optional[str]):
         if not project_path:
@@ -113,30 +156,29 @@ def build_project_workspace_demo(
                 gr.update(choices=[], value=None),
                 None,
                 False,
+                gr.update(),
+                gr.update(choices=[], value=None),
+                "en",
                 "Select or create a project.",
             )
         project = controller.load_project(project_path)
         settings = controller.load_project_settings(project)
         labels = _section_labels(project)
-        generated = [
-            section.id
-            for section in project.manifest.sections
-            if section.audio_file and (project.root / section.audio_file).exists()
-        ]
-        first_generated = generated[0] if generated else None
-        audio = (
-            str(controller.section_audio(project.root, first_generated))
-            if first_generated
-            else None
-        )
+        generated = _generated_section_ids(project)
+        first = generated[0] if generated else None
+        audio = str(controller.section_audio(project.root, first)) if first else None
         rows, _, _ = controller.project_view(project.root)
+        voice_update, variant_update = _voice_updates(settings)
         return (
             _project_summary(project, settings),
             gr.update(choices=labels, value=labels),
             rows,
-            gr.update(choices=generated, value=first_generated),
+            gr.update(choices=generated, value=first),
             audio,
             bool(settings.get("speak_section_titles", False)),
+            voice_update,
+            variant_update,
+            settings.get("language") or "en",
             f"Loaded {project.manifest.title}.",
         )
 
@@ -147,15 +189,17 @@ def build_project_workspace_demo(
 
     def variants_for_voice(name):
         variants = controller.voices.variant_choices(name) if name else []
-        return gr.update(choices=variants, value=("AUTO" if variants else None))
+        return gr.update(
+            choices=variants,
+            value=("AUTO" if "AUTO" in variants else (variants[0] if variants else None)),
+        )
 
     def analyze_script(script, speak_titles):
         try:
-            rows, message = controller.parse_script(
+            return controller.parse_script(
                 script,
                 speak_section_titles=bool(speak_titles),
             )
-            return rows, message
         except Exception as exc:
             raise gr.Error(f"Script analysis failed: {type(exc).__name__}: {exc}")
 
@@ -170,19 +214,18 @@ def build_project_workspace_demo(
             )
             items = controller.list_projects()
             labels = _section_labels(project)
-            settings = controller.load_project_settings(project)
             rows, _, _ = controller.project_view(project.root)
             return (
                 gr.update(choices=items, value=str(project.root)),
-                _project_summary(project, settings),
+                _project_summary(project, controller.load_project_settings(project)),
                 gr.update(choices=labels, value=labels),
                 rows,
-                f"Created {project.manifest.title}.",
+                f"Created {project.manifest.title}. The title-reading choice is saved with this project.",
             )
         except FileExistsError as exc:
             raise gr.Error(
-                f"Project already exists. Open it, create a differently titled script, "
-                f"or explicitly enable Replace existing project. Details: {exc}"
+                "A project with this title already exists. Open it, change the script title, "
+                "or explicitly enable Replace existing project. " + str(exc)
             )
         except Exception as exc:
             raise gr.Error(f"Create failed: {type(exc).__name__}: {exc}")
@@ -192,21 +235,21 @@ def build_project_workspace_demo(
             return gr.update(value=[])
         project = controller.load_project(project_path)
         labels = _section_labels(project)
-        chosen: list[str] = []
+        selected: list[str] = []
         for label, section in zip(labels, project.manifest.sections):
             chunks = [chunk for beat in section.beats for chunk in beat.chunks]
             if mode == "All":
-                chosen.append(label)
-            elif mode == "Pending" and section.status not in {"verified"}:
-                chosen.append(label)
+                selected.append(label)
+            elif mode == "Pending" and section.status != "verified":
+                selected.append(label)
             elif mode == "Needs review" and (
                 section.status == "unverified"
                 or any(chunk.status == "unverified" for chunk in chunks)
             ):
-                chosen.append(label)
+                selected.append(label)
             elif mode == "Failed" and section.status == "failed":
-                chosen.append(label)
-        return gr.update(value=chosen)
+                selected.append(label)
+        return gr.update(value=selected)
 
     def preflight(project_path, voice_name, variant, selected_labels):
         if not project_path:
@@ -214,9 +257,7 @@ def build_project_workspace_demo(
         if not voice_name:
             raise gr.Error("Select a voice first.")
         project = controller.load_project(project_path)
-        target_ids = _section_ids(selected_labels) or [
-            section.id for section in project.manifest.sections
-        ]
+        target_ids = _section_ids(selected_labels) or [s.id for s in project.manifest.sections]
         pending = 0
         verified = 0
         resolutions: dict[str, str] = {}
@@ -239,9 +280,8 @@ def build_project_workspace_demo(
             f"{style}→{value}" for style, value in sorted(resolutions.items())
         ) or "DEFAULT"
         return (
-            f"Preflight OK · {len(target_ids)} sections · "
-            f"{pending} pending chunks · {verified} already verified · "
-            f"styles {resolution_text}."
+            f"Preflight OK · {len(target_ids)} sections · {pending} pending chunks · "
+            f"{verified} already verified · styles {resolution_text}."
         )
 
     def generate_previews(project_path, voice_name, variant, language, strict):
@@ -251,24 +291,22 @@ def build_project_workspace_demo(
             raise gr.Error("Select a voice first.")
         try:
             project = controller.load_project(project_path)
-            quality = None
-            if hasattr(controller, "project_quality_preset"):
-                quality = controller.project_quality_preset(project)[0]
+            quality = _effective_quality(controller, project)
             preview = ProjectPreviewGenerator(
                 model,
                 controller.voices,
                 voice_name=voice_name,
                 preferred_variant=(variant or "AUTO"),
             )
+            robust_kwargs = {"strict": bool(strict)}
+            generation_kwargs = {}
+            if quality:
+                robust_kwargs["quality_preset"] = quality
+                generation_kwargs["quality_preset"] = quality
             results = preview.generate(
                 project,
-                robust_config=controller.robust_config(
-                    strict=bool(strict),
-                    **({"quality_preset": quality} if quality else {}),
-                ),
-                generation_config=controller.generation_config(
-                    **({"quality_preset": quality} if quality else {})
-                ),
+                robust_config=controller.robust_config(**robust_kwargs),
+                generation_config=controller.generation_config(**generation_kwargs),
                 language=language or None,
                 strict=bool(strict),
             )
@@ -296,9 +334,7 @@ def build_project_workspace_demo(
         if not voice_name:
             raise gr.Error("Select a voice first.")
         project = controller.load_project(project_path)
-        target_ids = _section_ids(selected_labels) or [
-            section.id for section in project.manifest.sections
-        ]
+        target_ids = _section_ids(selected_labels) or [s.id for s in project.manifest.sections]
         total = len(target_ids)
         for index, section_id in enumerate(target_ids, start=1):
             yield (
@@ -310,8 +346,9 @@ def build_project_workspace_demo(
             )
             try:
                 kwargs = {}
-                if hasattr(controller, "project_quality_preset"):
-                    kwargs["quality_preset"] = controller.project_quality_preset(project)[0]
+                quality = _effective_quality(controller, project)
+                if quality:
+                    kwargs["quality_preset"] = quality
                 project = controller.generate(
                     project.root,
                     voice_name=voice_name,
@@ -326,15 +363,14 @@ def build_project_workspace_demo(
                 raise gr.Error(
                     f"Generation failed at {section_id}: {type(exc).__name__}: {exc}"
                 )
-            rows, _, generated = controller.project_view(project.root)
+            rows, _, _ = controller.project_view(project.root)
             section = project.get_section(section_id)
-            audio = (
-                str(project.root / section.audio_file) if section.audio_file else None
-            )
+            audio = str(project.root / section.audio_file) if section.audio_file else None
             labels = _section_labels(project)
+            selected_now = _labels_for_ids(labels, target_ids)
             yield (
                 rows,
-                gr.update(choices=labels, value=selected_labels),
+                gr.update(choices=labels, value=selected_now),
                 audio,
                 f"Finished {section_id}: {section.status} · {index}/{total}.",
                 _project_summary(project, controller.load_project_settings(project)),
@@ -344,11 +380,7 @@ def build_project_workspace_demo(
         if not project_path:
             return gr.update(choices=[], value=None), None
         project = controller.load_project(project_path)
-        ids = [
-            section.id
-            for section in project.manifest.sections
-            if section.audio_file and (project.root / section.audio_file).exists()
-        ]
+        ids = _generated_section_ids(project)
         first = ids[0] if ids else None
         return (
             gr.update(choices=ids, value=first),
@@ -359,9 +391,11 @@ def build_project_workspace_demo(
         if not project_path or not section_id:
             return None, gr.update(choices=[], value=None)
         project = controller.load_project(project_path)
-        audio = str(controller.section_audio(project.root, section_id))
         chunks = _chunk_labels(project, section_id)
-        return audio, gr.update(choices=chunks, value=(chunks[0] if chunks else None))
+        return (
+            str(controller.section_audio(project.root, section_id)),
+            gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
+        )
 
     def show_chunk(project_path, chunk_label):
         if not project_path or not chunk_label:
@@ -373,20 +407,15 @@ def build_project_workspace_demo(
         if chunk.report_file:
             report_path = project.root / chunk.report_file
             if report_path.exists():
-                import json
-
                 payload = json.loads(report_path.read_text(encoding="utf-8"))
                 reports = payload.get("reports") or []
                 if reports:
                     last = reports[-1]
-                    transcript = last.get("transcript", "")
-                    similarity = last.get("similarity")
-                    wer = last.get("wer")
                     report = (
-                        f"\n\n**ASR:** {transcript}\n\n"
-                        f"Similarity: `{similarity}` · WER: `{wer}`"
+                        f"\n\n**ASR heard:**\n\n{last.get('transcript', '')}\n\n"
+                        f"Similarity: `{last.get('similarity')}` · WER: `{last.get('wer')}`"
                     )
-        return f"**Expected:**\n\n{chunk.text}{report}"
+        return f"**Expected text:**\n\n{chunk.text}{report}"
 
     def regenerate_chunk(
         project_path,
@@ -398,10 +427,11 @@ def build_project_workspace_demo(
     ):
         if not project_path or not chunk_label:
             raise gr.Error("Select a chunk first.")
-        kwargs = {}
         project = controller.load_project(project_path)
-        if hasattr(controller, "project_quality_preset"):
-            kwargs["quality_preset"] = controller.project_quality_preset(project)[0]
+        kwargs = {}
+        quality = _effective_quality(controller, project)
+        if quality:
+            kwargs["quality_preset"] = quality
         project = controller.regenerate_chunk(
             project.root,
             chunk_label,
@@ -412,11 +442,10 @@ def build_project_workspace_demo(
             **kwargs,
         )
         section_id, _ = _chunk_target(chunk_label)
-        audio = str(controller.section_audio(project.root, section_id))
         chunks = _chunk_labels(project, section_id)
         rows, _, _ = controller.project_view(project.root)
         return (
-            audio,
+            str(controller.section_audio(project.root, section_id)),
             gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
             rows,
             _project_summary(project, controller.load_project_settings(project)),
@@ -435,29 +464,24 @@ def build_project_workspace_demo(
         except Exception as exc:
             raise gr.Error(f"Merge failed: {type(exc).__name__}: {exc}")
 
-    if initial_project:
-        initial_loaded = controller.load_project(initial_project)
-        initial_settings = controller.load_project_settings(initial_loaded)
+    if initial_loaded:
         initial_summary = _project_summary(initial_loaded, initial_settings)
         initial_section_labels = _section_labels(initial_loaded)
         initial_rows, _, _ = controller.project_view(initial_loaded.root)
         initial_titles = bool(initial_settings.get("speak_section_titles", False))
+        initial_generated = _generated_section_ids(initial_loaded)
+        initial_generated_value = initial_generated[0] if initial_generated else None
     else:
         initial_summary = "### No project selected"
         initial_section_labels = []
         initial_rows = []
         initial_titles = False
+        initial_generated = []
+        initial_generated_value = None
 
     status_headers = [
-        "Section",
-        "Title",
-        "Style",
-        "Planned",
-        "Beats",
-        "Chunks",
-        "Verified",
-        "Unverified",
-        "Status",
+        "Section", "Title", "Style", "Planned", "Beats", "Chunks",
+        "Verified", "Unverified", "Status",
     ]
     parse_headers = ["Section", "Title", "Style", "Planned", "Beats", "Chunks"]
 
@@ -482,14 +506,15 @@ def build_project_workspace_demo(
                 speak_titles = gr.Checkbox(
                     label="Read section titles (###)",
                     value=initial_titles,
+                    info="Saved when the project is created/rebuilt. Changing it later requires rebuilding the project.",
                 )
                 replace_existing = gr.Checkbox(
-                    label="Replace existing project",
+                    label="I understand: replace existing project",
                     value=False,
-                    info="Destructive: existing generated files for the same project are replaced.",
+                    info="Destructive for generated files belonging to the same project title.",
                 )
                 analyze = gr.Button("Analyze script")
-                create = gr.Button("Create project", variant="primary")
+                create = gr.Button("Create / Rebuild project", variant="primary")
             parse_table = gr.Dataframe(headers=parse_headers, interactive=False, wrap=True)
             script_status = gr.Markdown("Analyze the script before rendering.")
 
@@ -499,12 +524,14 @@ def build_project_workspace_demo(
                 variant = gr.Dropdown(
                     label="Variant",
                     choices=initial_variants,
-                    value=("AUTO" if initial_variants else None),
+                    value=initial_variant,
                 )
-                language = gr.Textbox(label="Language", value="en")
+                language = gr.Textbox(
+                    label="Language",
+                    value=initial_settings.get("language") or "en",
+                )
                 strict = gr.Checkbox(label="Exact mode", value=False)
-            with gr.Row():
-                preview_button = gr.Button("Generate opening / middle / ending previews")
+            preview_button = gr.Button("Generate opening / middle / ending previews")
             with gr.Row():
                 opening = gr.Audio(label="Opening", type="filepath")
                 middle = gr.Audio(label="Middle", type="filepath")
@@ -538,7 +565,11 @@ def build_project_workspace_demo(
 
         with gr.Accordion("4 · Review", open=True):
             with gr.Row():
-                generated_picker = gr.Dropdown(label="Generated section", choices=[])
+                generated_picker = gr.Dropdown(
+                    label="Generated section",
+                    choices=initial_generated,
+                    value=initial_generated_value,
+                )
                 refresh_generated = gr.Button("Refresh generated sections")
             section_audio = gr.Audio(label="Section audio", type="filepath")
             chunk_picker = gr.Dropdown(label="Chunk to inspect", choices=[])
@@ -565,6 +596,9 @@ def build_project_workspace_demo(
                 generated_picker,
                 section_audio,
                 speak_titles,
+                voice,
+                variant,
+                language,
                 render_status,
             ],
         )
