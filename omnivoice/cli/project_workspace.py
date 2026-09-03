@@ -247,8 +247,6 @@ def build_project_workspace_demo(
                 or any(chunk.status == "unverified" for chunk in chunks)
             ):
                 selected.append(label)
-            elif mode == "Failed" and section.status == "failed":
-                selected.append(label)
         return gr.update(value=selected)
 
     def preflight(project_path, voice_name, variant, selected_labels):
@@ -256,8 +254,10 @@ def build_project_workspace_demo(
             raise gr.Error("Select a project first.")
         if not voice_name:
             raise gr.Error("Select a voice first.")
+        target_ids = _section_ids(selected_labels)
+        if not target_ids:
+            raise gr.Error("Select at least one section.")
         project = controller.load_project(project_path)
-        target_ids = _section_ids(selected_labels) or [s.id for s in project.manifest.sections]
         pending = 0
         verified = 0
         resolutions: dict[str, str] = {}
@@ -333,14 +333,17 @@ def build_project_workspace_demo(
             raise gr.Error("Select a project first.")
         if not voice_name:
             raise gr.Error("Select a voice first.")
+        target_ids = _section_ids(selected_labels)
+        if not target_ids:
+            raise gr.Error("Select at least one section.")
         project = controller.load_project(project_path)
-        target_ids = _section_ids(selected_labels) or [s.id for s in project.manifest.sections]
         total = len(target_ids)
         for index, section_id in enumerate(target_ids, start=1):
             yield (
                 gr.update(),
                 gr.update(),
                 None,
+                gr.update(),
                 f"Rendering {section_id} · {index}/{total}...",
                 _project_summary(project, controller.load_project_settings(project)),
             )
@@ -368,10 +371,12 @@ def build_project_workspace_demo(
             audio = str(project.root / section.audio_file) if section.audio_file else None
             labels = _section_labels(project)
             selected_now = _labels_for_ids(labels, target_ids)
+            generated = _generated_section_ids(project)
             yield (
                 rows,
                 gr.update(choices=labels, value=selected_now),
                 audio,
+                gr.update(choices=generated, value=section_id),
                 f"Finished {section_id}: {section.status} · {index}/{total}.",
                 _project_summary(project, controller.load_project_settings(project)),
             )
@@ -541,7 +546,7 @@ def build_project_workspace_demo(
         with gr.Accordion("3 · Render", open=True):
             with gr.Row():
                 section_filter = gr.Radio(
-                    ["All", "Pending", "Needs review", "Failed"],
+                    ["All", "Pending", "Needs review"],
                     value="All",
                     label="Quick select",
                 )
@@ -602,7 +607,7 @@ def build_project_workspace_demo(
                 render_status,
             ],
         )
-        voice.change(variants_for_voice, inputs=voice, outputs=variant)
+        voice.input(variants_for_voice, inputs=voice, outputs=variant)
         analyze.click(
             analyze_script,
             inputs=[script, speak_titles],
@@ -631,7 +636,14 @@ def build_project_workspace_demo(
         render_button.click(
             render_stream,
             inputs=[project, voice, variant, language, section_selection, resume, strict],
-            outputs=[status_table, section_selection, render_audio, render_status, project_header],
+            outputs=[
+                status_table,
+                section_selection,
+                render_audio,
+                generated_picker,
+                render_status,
+                project_header,
+            ],
         )
         refresh_generated.click(
             generated_sections,
