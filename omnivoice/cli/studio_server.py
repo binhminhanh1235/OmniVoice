@@ -44,7 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--device", default=None)
     serve.add_argument("--workspace", default=None)
     serve.add_argument("--asr-model", default="openai/whisper-small.en")
-    serve.add_argument("--asr-device", default="cpu")
+    serve.add_argument(
+        "--asr-device",
+        default="cpu",
+        help=(
+            "ASR device. CPU ASR is loaded lazily on first transcription; "
+            "dedicated CUDA/XPU ASR remains eager so accelerator placement is preserved."
+        ),
+    )
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument(
@@ -112,6 +119,12 @@ def _public_endpoint(args):
     return configure_mcp_security_for_public_url(value)
 
 
+def _should_eager_load_asr(device: str) -> bool:
+    """Remove CPU Whisper from startup while preserving dedicated GPU placement."""
+
+    return str(device).lower().startswith(("cuda", "xpu"))
+
+
 def serve(args) -> int:
     import uvicorn
 
@@ -119,23 +132,29 @@ def serve(args) -> int:
     hardware = detect_hardware()
     device = args.device or get_best_device()
     public = _public_endpoint(args)
+    eager_asr = _should_eager_load_asr(args.asr_device)
 
     logger.info("Runtime: %s", runtime.summary())
     logger.info("Hardware: %s", hardware.summary())
     logger.info(
-        "Loading OmniVoice model=%s device=%s asr_device=%s",
+        "Loading OmniVoice model=%s device=%s asr_device=%s asr_startup=%s",
         args.model,
         device,
         args.asr_device,
+        "eager" if eager_asr else "lazy",
     )
     model = OmniVoice.from_pretrained(
         args.model,
         device_map=device,
         dtype=torch.float16,
-        load_asr=True,
+        load_asr=eager_asr,
         asr_model_name=args.asr_model,
         asr_device=args.asr_device,
     )
+    if not eager_asr:
+        logger.info(
+            "CPU ASR deferred until the first transcription/verification request; API/UI startup does not wait for Whisper."
+        )
 
     app = create_studio_app(
         model,
