@@ -7,6 +7,7 @@ on:
       - "omnivoice/benchmark.py"
       - "omnivoice/data_management.py"
       - "omnivoice/runtime_rclone.py"
+      - "omnivoice/runtime_cache.py"
       - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
       - "omnivoice/section_export.py"
@@ -74,6 +75,7 @@ on:
       - "tests/test_data_management.py"
       - "tests/test_hardware_quality.py"
       - "tests/test_runtime_workspace.py"
+      - "tests/test_runtime_cache.py"
       - "tests/test_studio_service.py"
       - "tests/test_studio_server.py"
       - "tests/test_job_manager.py"
@@ -179,6 +181,7 @@ jobs:
             tests/test_data_management.py \
             tests/test_hardware_quality.py \
             tests/test_runtime_workspace.py \
+            tests/test_runtime_cache.py \
             tests/test_studio_service.py \
             tests/test_studio_server.py \
             tests/test_job_manager.py \
