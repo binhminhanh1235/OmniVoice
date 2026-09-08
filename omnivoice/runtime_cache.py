@@ -63,11 +63,29 @@ class RuntimeCacheFingerprint:
             package_ref=str(package_ref),
         )
 
+    def compatibility_dict(self) -> dict[str, object]:
+        """Fields that decide whether binary/model caches are reusable."""
+
+        return {
+            "schema_version": self.schema_version,
+            "cache_version": self.cache_version,
+            "python_version": self.python_version,
+            "system": self.system,
+            "machine": self.machine,
+        }
+
     @property
     def key(self) -> str:
-        payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        payload = json.dumps(
+            self.compatibility_dict(), sort_keys=True, separators=(",", ":")
+        )
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
         return f"{self.cache_version}-{digest}"
+
+    @property
+    def package_key(self) -> str:
+        digest = hashlib.sha256(self.package_ref.encode("utf-8")).hexdigest()[:16]
+        return digest
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -189,8 +207,17 @@ def _fingerprint_matches(
 ) -> bool:
     if not payload:
         return False
-    stored = payload.get("fingerprint")
-    return isinstance(stored, dict) and stored == fingerprint.to_dict()
+    stored = payload.get("compatibility")
+    if isinstance(stored, dict):
+        return stored == fingerprint.compatibility_dict()
+    # Backward-compatible reader for early metadata written before package
+    # revisions were split from resource-cache compatibility.
+    legacy = payload.get("fingerprint")
+    if isinstance(legacy, dict):
+        legacy = dict(legacy)
+        legacy.pop("package_ref", None)
+        return legacy == fingerprint.compatibility_dict()
+    return False
 
 
 def _sync_tree(source: Path, destination: Path) -> None:
@@ -224,6 +251,8 @@ def _write_metadata(
     payload = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint.to_dict(),
+        "compatibility": fingerprint.compatibility_dict(),
+        "last_package_ref": fingerprint.package_ref,
         "state": state,
         "restored_from": str(restored_from) if restored_from else None,
         "updated_at": _utc_now(),
@@ -337,6 +366,7 @@ def cache_status(
         "environment": layout.environment,
         "fingerprint": fingerprint.to_dict(),
         "cache_key": fingerprint.key,
+        "package_key": fingerprint.package_key,
         "local_namespace": str(local),
         "local_ready": _fingerprint_matches(_read_metadata(local), fingerprint),
         "source_namespace": str(source) if source else None,
