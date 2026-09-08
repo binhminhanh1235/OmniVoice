@@ -1,22 +1,12 @@
-# OmniVoice Project Studio — P0 workflow
+# OmniVoice Project Studio
 
-Project Studio is the persistent long-form narration layer built on top of `RobustLongFormGenerator`.
+Project Studio is the persistent long-form narration layer built on top of OmniVoice and the robust per-chunk verification pipeline.
 
-It is designed for scripts such as:
+For end-to-end setup, see [GUIDE-COMPACT.vi.md](GUIDE-COMPACT.vi.md) or [GUIDE-FULL.vi.md](GUIDE-FULL.vi.md).
 
-```markdown
-# 5 People You Should Stop Enabling
+## Project model
 
-## S01 — 0:00–0:45
-
-[WARM] Not every time you step in, you are actually helping.
-
-## S02 — 0:45–1:45
-
-[SOFT] Let's be clear from the beginning.
-```
-
-The parser creates:
+Scripts are parsed into:
 
 ```text
 Project
@@ -29,147 +19,159 @@ Project
       Chunk B01-C01
 ```
 
-## Fastest path: Project Studio UI
+A project persists script, settings, section/chunk status, generated audio and output so interrupted runtimes can resume rather than restart.
 
-After installing the branch, launch:
+## Unified project-first UI
+
+Launch:
 
 ```bash
 omnivoice-project-studio \
   --model k2-fsa/OmniVoice \
-  --workspace /content/drive/MyDrive/OmniVoiceStudio \
-  --share
+  --workspace ./OmniVoiceStudio
 ```
 
-The UI is organized around three steps:
+The production workflow is organized around:
 
-1. **Voice Library** — save a reference voice once.
-2. **Project** — paste/parse the entire Markdown script and create a persistent project.
-3. **Generate / Resume** — choose a voice, generate all or selected sections, regenerate one bad chunk, play section WAVs, and merge `full.wav`.
+1. **Script**: parse/create a persistent project.
+2. **Voice**: create/reuse Voice Library entries and variants.
+3. **Preview**: validate representative output before a long render.
+4. **Render**: generate all or selected sections with resume.
+5. **Review**: inspect section/chunk state and regenerate targeted failures.
+6. **Export**: merge verified output.
 
-The UI is intentionally a thin wrapper over the Python project APIs, so project files remain usable without Gradio.
+Recovery, Text Doctor, Section History, Hardware & Quality, Advanced Settings, Storage/Backup and Queue support the same project.
 
-## Voice Library
+## Voice Library and variants
 
-A reference is encoded once into `VoiceClonePrompt` and saved for reuse across Colab sessions and projects:
+A reference can be encoded once into `VoiceClonePrompt` and reused:
 
 ```python
 from omnivoice import VoiceLibrary
 
-voices = VoiceLibrary(
-    "/content/drive/MyDrive/OmniVoiceStudio/voices"
-)
+voices = VoiceLibrary("./OmniVoiceStudio/voices")
 
 voices.create_from_reference(
     model,
-    name="Warm American Male",
+    name="Narrator",
     reference_audio="ref.wav",
     ref_text="Exact words spoken in the reference clip.",
     language="en",
 )
-
-voice_prompt = voices.load_prompt("Warm American Male")
 ```
 
-Voice files are stored like:
+One voice can contain variants such as:
 
 ```text
-voices/
-  warm-american-male/
-    voice.json
-    prompts/
-      default.pt
-    references/
-      default.wav
+DEFAULT
+WARM
+SOFT
+PRAYER
+EMPHASIZE
 ```
 
-The storage format already supports variants (`DEFAULT`, `WARM`, `SOFT`, etc.), which prepares the project layer for a later Voice Style Bank. P0 only requires one default variant.
+Selecting `AUTO` allows the Style Resolver to prefer a matching saved variant.
 
-## Important directive behavior
+## Script format
 
-Square-bracket directives at the beginning of a line are metadata. They are removed from spoken text.
+Example:
 
-Supported P0 generic style intents:
+```markdown
+# Video title
+
+## S01 - 0:00-0:45
+### Opening
+
+[WARM] Not every time you step in, you are actually helping.
+
+## S02 - 0:45-1:30
+[EMPHASIZE] Do they own what is true?
+Or do they rewrite the conversation until you become the villain?
+```
+
+## Directive behavior
+
+Square-bracket directives at the beginning of a line are metadata and are removed from spoken text.
+
+Generic style intents include:
 
 - `WARM`
 - `SOFT`
 - `EMPHASIZE`
 - `NORMAL` / `DEFAULT`
 
-These generic emotion/delivery tags are **not** passed to OmniVoice as raw `instruct` strings. OmniVoice does not officially expose `warm`, `soft`, or `emphasize` as voice-design attributes.
+Generic intents are not blindly forwarded as unsupported native OmniVoice `instruct` strings.
 
-The style resolver instead makes conservative delivery adjustments such as speed and pause length.
+Documented native voice-design attributes can map directly where appropriate, for example whisper or pitch controls.
 
-Documented OmniVoice-native attributes can map directly. P0 includes examples:
+## Section-title narration
 
-- `[WHISPER]` -> `instruct="whisper"`
-- `[LOW PITCH]` -> `instruct="low pitch"`
-- `[HIGH PITCH]` -> `instruct="high pitch"`
-
-This separation keeps the script format model-agnostic.
-
-## Headings are not spoken
-
-The following are project metadata and are excluded from TTS:
+By default, Markdown headings are metadata.
 
 ```markdown
 # Project title
-## S01 — 0:00–0:45
+## S01 - 0:00-0:45
 ### Section subtitle
-[WARM]
 ```
 
-A Markdown line-ending backslash is also removed before TTS.
+`###` titles can optionally be narrated by enabling:
 
-## Create a project from Python
-
-```python
-from omnivoice import OmniVoiceProject
-
-project = OmniVoiceProject.create(
-    SCRIPT,
-    "/content/drive/MyDrive/OmniVoiceStudio/projects/5-people-stop-enabling",
-    max_chunk_words=24,
-    max_chunk_chars=220,
-)
-
-for row in project.summary():
-    print(row)
+```text
+Read section titles (###)
 ```
 
-Project files are stored like:
+When enabled, the section title becomes a dedicated first spoken beat. The original Markdown script remains unchanged on disk.
+
+## Leading conjunction safeguard
+
+Sentence-initial conjunctions such as `Or`, `And`, `But`, `So`, `Yet`, and `Nor` can sound fragile when they begin an isolated chunk.
+
+The narration parser attempts to merge such a chunk with the previous chunk when:
+
+- a previous chunk exists;
+- the previous chunk does not end a paragraph boundary;
+- the combined text still satisfies configured word/character limits.
+
+This keeps context for pronunciation without allowing chunks to grow unbounded.
+
+## Language selection
+
+Studio language controls use dropdown selectors and prioritize English first.
+
+The UI still passes stable backend language IDs such as `en`, so presentation changes do not alter the generation API contract.
+
+## Persistent project files
+
+A project contains data similar to:
 
 ```text
 project/
   project.json
   studio.json
   script.md
+  section-status.json
   sections/
     S01/
       text.txt
       metadata.json
       chunks/
-        B01-C01.wav
-        B01-C01.json
       beats/
-        B01.wav
       S01.wav
-    S02/
-      ...
   output/
 ```
 
-`studio.json` is written by the UI/controller and remembers the selected voice, voice variant, and language for the project.
+`studio.json` stores project-level generation choices. Unified Workspace preserves project-shaping metadata such as section-title narration when later generation settings are saved.
 
-## Generate
+## Generate and resume
 
-Load a reusable prompt from the Voice Library, then generate:
+A direct Python path remains available:
 
 ```python
 from omnivoice import OmniVoiceProject, VoiceLibrary
 
 project = OmniVoiceProject.load(PROJECT_DIR)
 voices = VoiceLibrary(VOICE_LIBRARY_DIR)
-voice_prompt = voices.load_prompt("Warm American Male")
+voice_prompt = voices.load_prompt("Narrator")
 
 project.generate(
     model,
@@ -179,22 +181,9 @@ project.generate(
 )
 ```
 
-Every project chunk is passed through the robust generation quality gate. Its WAV and verification JSON are saved immediately after generation.
+With `resume=True`, verified chunks with valid output on disk are skipped.
 
-## Resume after a Colab interruption
-
-```python
-project = OmniVoiceProject.load(PROJECT_DIR)
-project.generate(
-    model,
-    voice_clone_prompt=voice_prompt,
-    resume=True,
-)
-```
-
-Chunks already marked `verified` and present on disk are skipped.
-
-Example:
+Example state:
 
 ```text
 S07
@@ -204,27 +193,9 @@ S07
   B01-C04 pending
 ```
 
-Generation resumes from the pending work instead of starting the whole project again.
+Generation continues from pending work.
 
-## Regenerate one bad chunk
-
-```python
-project.mark_chunk_for_regeneration(
-    "S07",
-    "B01-C04",
-)
-
-project.generate(
-    model,
-    voice_clone_prompt=voice_prompt,
-    section_ids=["S07"],
-    resume=True,
-)
-```
-
-Other verified chunks remain untouched. The Gradio UI exposes the same operation through the **Regenerate selected chunk** button.
-
-## Generate only selected sections
+## Generate selected sections
 
 ```python
 project.generate(
@@ -235,71 +206,113 @@ project.generate(
 )
 ```
 
-In the UI, enter for example:
+The UI exposes human-readable section selection while preserving stable section IDs.
 
-```text
-S03,S07,S10
+## Regenerate one chunk
+
+```python
+project.mark_chunk_for_regeneration("S07", "B01-C04")
+
+project.generate(
+    model,
+    voice_clone_prompt=voice_prompt,
+    section_ids=["S07"],
+    resume=True,
+)
 ```
 
-Leave the field empty to generate the whole project.
+Other verified chunks remain untouched.
 
-## Project status
+Section Version History provides an additional recovery boundary around targeted regeneration and forced rerenders.
 
-The UI shows section-level status:
+## Quality and verification
+
+The normal configuration path is one of:
 
 ```text
-Section | Style | Chunks | Verified | Unverified | Status
-S01     | WARM  | 4      | 4        | 0          | verified
-S02     | WARM  | 6      | 6        | 0          | verified
-S03     | EMPHASIZE | 7  | 6        | 1          | unverified
+SAFE
+BALANCED
+FAST
 ```
 
-A chunk dropdown exposes every `Sxx/Bxx-Cxx` unit for targeted regeneration.
+`BALANCED` is the recommended starting point for most production work.
 
-## Merge the finished project
+Advanced Settings can override specific project behavior while keeping the preset as the primary policy.
 
-By default merge requires all sections to be verified:
+Each generated chunk passes through the configured verification/retry path. A failed chunk can be repaired independently.
+
+## Preview
+
+Preview representative opening/middle/ending samples before a long render.
+
+Use preview to catch:
+
+- wrong reference;
+- pronunciation issues;
+- pacing;
+- style mismatch;
+- language/accent problems.
+
+## Queue
+
+Project Queue supports multi-project workflows with persistent status, section-level resume, cooperative pause, error isolation and optional auto-merge.
+
+Project states include:
+
+```text
+PENDING
+GENERATING
+NEEDS_REVIEW
+FAILED
+DONE
+```
+
+## Merge and export
+
+By default, final merge requires verified sections:
 
 ```python
 full_wav = project.merge(section_pause_ms=300)
 ```
 
-Outputs:
+Typical outputs:
 
 ```text
 output/full.wav
 output/timeline.json
 ```
 
-`timeline.json` records both planned script timestamps and actual generated durations. Planned timestamps are metadata; P0 does not time-stretch speech to force the WAV to match them.
+Timeline metadata records planned script timing and actual generated duration. Planned timestamps are metadata and do not force time-stretching.
 
-## P0 status
+## Hosted-runtime rule
 
-Implemented:
+On Kaggle/Colab, use local SSD for active generation.
+
+Remote Drive/Dataset/cloud storage should be treated as a restore/sync/export boundary.
+
+This keeps section/chunk checkpoint I/O away from high-latency remote filesystems.
+
+## Current production status
+
+Merged:
 
 - persistent Project model;
-- `S01`, `S02`, ... parser;
-- directive stripping and metadata;
-- Project -> Section -> Beat -> Chunk hierarchy;
-- separate section WAVs;
-- robust chunk verification reports;
+- robust section/chunk generation and verification;
 - checkpoint/resume;
-- regenerate one chunk;
-- optional full WAV merge;
-- generic style resolver separated from native OmniVoice `instruct`;
-- persistent Voice Library with saved `VoiceClonePrompt`;
-- voice variants storage format;
-- Simple Gradio Project UI;
-- visual section/chunk status;
-- play generated section;
-- UI actions for Generate, Resume, targeted Regenerate, and Merge.
+- targeted regeneration;
+- Voice Library and Style Bank;
+- preview;
+- Text Doctor;
+- Voice Doctor;
+- Voice Stability;
+- Section Version History;
+- multi-project queue;
+- quality presets;
+- Advanced Settings;
+- unified project-first workspace;
+- English-first language selectors;
+- optional section-title narration;
+- leading conjunction safeguard;
+- AI-native Job Manager/SSE/MCP/tunnel/auth foundation.
 
-Next after P0 stabilizes:
-
-- Voice Style Bank (`neutral`, `warm`, `soft`, `prayer` reference prompts) with automatic style selection;
-- preview 3 samples before full render;
-- reference Voice Doctor / quality score;
-- adaptive retry based on failure type;
-- pacing anomaly detector;
-- richer directive DSL and per-line style overrides;
-- timeline editor and section version history.
+For current in-review, experimental and planned work, see [project-studio-roadmap.md](project-studio-roadmap.md).
