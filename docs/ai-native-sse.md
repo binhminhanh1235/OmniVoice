@@ -77,18 +77,20 @@ cancelled
 
 A client that reconnects after completion can still replay the stored event history and then receives a clean end-of-stream.
 
-## Why this comes before MCP
+## Relationship to MCP
 
-MCP tools will submit durable jobs and can return a `job_id` immediately. The same event stream then provides progress to any protocol adapter without duplicating generation logic.
+MCP is now implemented on top of the same durable Job Manager. A generation tool returns a `job_id` immediately, while SSE remains the protocol-neutral live progress surface.
 
 ```text
-ChatGPT / Claude / Antigravity
-             |
-            MCP
-             |
-      Studio Job Manager
-          /       \
-       REST       SSE
+AI client
+   |
+  MCP
+   |
+Studio Job Manager
+   |          |
+ REST        SSE
 ```
 
-The next AI-native slice can therefore focus on task-oriented MCP tools rather than inventing another progress system.
+This keeps job state and progress semantics shared across Gradio, REST and MCP instead of creating protocol-specific render loops.
+
+For current MCP tools and planned command expansion, see [ai-native-mcp.md](ai-native-mcp.md) and [project-studio-roadmap.md](project-studio-roadmap.md).
