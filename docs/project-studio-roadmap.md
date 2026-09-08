@@ -1,6 +1,13 @@
 # OmniVoice Project Studio roadmap
 
-This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SSD first, then an AI-native service layer while keeping the Gradio web UI.
+This roadmap prioritizes reliable long-form narration on hosted local GPU/SSD, then an AI-native service layer while keeping the Gradio web UI.
+
+## Status legend
+
+- **MERGED**: implementation and regression coverage are on the production line.
+- **PARTIAL**: a production-safe subset is merged, but the listed surface is not complete.
+- **EXPERIMENTAL**: code may exist outside the production line and is not enabled by default.
+- **TODO**: not implemented yet.
 
 ## P0 — usable project workflow
 
@@ -61,28 +68,29 @@ This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SS
    - no Google Drive/rclone/remote persistence in this phase;
    - dedicated Kaggle notebook;
    - execution and future persistence kept as separate architectural layers.
-4. [ ] Remote persistence adapter for exporting/synchronizing the Kaggle execution workspace after the local-first path is stable.
-5. [ ] Cache reusable verification/preprocessing metadata and avoid repeated ASR/setup work.
-6. [ ] Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
-7. [ ] Same-language reference selection when one voice has multiple language variants.
-8. [ ] Benchmark acceleration options such as FlashInfer/CUDA graphs before enabling them by default.
+4. [x] **MERGED** Optional project/data export and Google Drive sync through the separate Data Management/rclone boundary.
+5. [x] **MERGED** Persistent hosted-runtime startup cache for pip/wheels, Hugging Face/model assets, Torch and Whisper/ASR resources, with cache versioning, compatibility invalidation, local-SSD restore, Colab Drive persistence, and Kaggle Dataset cache export/restore.
+6. [ ] **TODO** Cache reusable verification/preprocessing results beyond startup/model resources.
+7. [ ] **TODO** Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
+8. [ ] **TODO** Same-language reference selection when one voice has multiple language variants.
+9. [ ] **EXPERIMENTAL** Decoder acceleration candidates such as target-only projection, FlashInfer or CUDA graphs. None may become default without measured speed/memory gains plus output and TTS-quality equivalence.
 
 ## P2.5 — AI-native OmniVoice while keeping Web UI
 
 The Gradio UI remains a first-class interface. AI-native clients use the same application services rather than duplicating generation logic.
 
-1. [x] Protocol-neutral `StudioService` application layer for runtime, projects, queue and capabilities.
-2. [x] Unified FastAPI server with Gradio mounted at `/ui`.
-3. [x] Read-only REST/OpenAPI foundation: `/health`, `/api/v1/capabilities`, `/api/v1/hardware`, projects and queue summaries.
-4. [ ] Async single-GPU Job Manager with persisted job state and cooperative cancellation/pause boundaries.
-5. [ ] Write REST API for preview, generate, queue, regenerate and merge using job IDs instead of long blocking requests.
-6. [ ] Job event stream (SSE) for section/chunk progress.
-7. [ ] MCP server mounted at `/mcp` using the same service/job layer.
-8. [ ] Stable hostname publishing path using a named tunnel; ChatGPT/Claude/Antigravity must never depend on random `*.gradio.live` URLs.
-9. [ ] API authentication/scopes independent from Gradio UI auth.
-10. [ ] Universal OmniVoice Skill describing safe production workflows and quality rules.
-11. [ ] Thin adapters/examples for ChatGPT, Claude Code and Antigravity.
-12. [ ] Optional persistent control plane + worker registry for reconnecting Kaggle/Colab workers without changing client configuration.
+1. [x] **MERGED** Protocol-neutral `StudioService` application layer for runtime, projects, queue and capabilities.
+2. [x] **MERGED** Unified FastAPI server with Gradio mounted at `/ui`.
+3. [x] **MERGED** Read-only REST/OpenAPI foundation: `/health`, `/api/v1/capabilities`, `/api/v1/hardware`, projects and queue summaries.
+4. [x] **MERGED** Persistent single-GPU `StudioJobManager`: FIFO serialization, durable `jobs.json`, idempotency keys, restart recovery and cooperative cancellation.
+5. [~] **PARTIAL** Write REST API. Merged today: async resumable `POST /api/v1/projects/{id}/generate` returning `job_id`, plus cooperative `POST /api/v1/jobs/{id}/cancel`. Still TODO: preview, queue mutation, regenerate and merge write handlers.
+6. [x] **MERGED** Durable Server-Sent Events at `/api/v1/jobs/{id}/stream`, including event replay, `Last-Event-ID` resume, heartbeats and terminal close behavior.
+7. [x] **MERGED** Streamable HTTP MCP mounted at `/mcp`, sharing `StudioService` and `StudioJobManager`. Initial tools cover status, projects, queue, generate, job inspection and cancel.
+8. [x] **MERGED** Stable-hostname publishing through a remotely-managed Cloudflare named tunnel. Ephemeral Kaggle/Colab connectors can reconnect the same hostname.
+9. [x] **MERGED** Machine bearer authentication and scopes independent from optional Gradio Basic auth. Public deployments fail closed unless explicitly overridden for insecure testing.
+10. [ ] **TODO** Universal OmniVoice Skill describing safe production workflows and quality rules.
+11. [ ] **TODO** Thin adapters/examples for ChatGPT, Claude Code and Antigravity.
+12. [ ] **TODO** Optional persistent control plane + worker registry for graceful offline/reconnect handling without changing client configuration.
 
 ## P3 — authoring and production tools
 
@@ -94,26 +102,36 @@ The Gradio UI remains a first-class interface. AI-native clients use the same ap
 
 ## Next priority
 
-Finish and validate the **AI-native server foundation** while preserving the existing Gradio workflow.
+The AI-native foundation is now production-merged. The next priority is to complete the **remaining write surfaces** without duplicating generation logic:
+
+1. preview as a durable job;
+2. queue mutation through the shared command/job layer;
+3. chunk/section regenerate as a durable job;
+4. merge/export as a durable job;
+5. Universal OmniVoice Skill and thin client examples after the write contract is complete.
+
+Current production topology:
 
 ```text
                        OmniVoice Studio
-                              │
-             ┌────────────────┼────────────────┐
-             │                │                │
+                              |
+             +----------------+----------------+
+             |                |                |
            /ui             /api/v1           /mcp
-         Gradio              REST           planned
-             │                │                │
-             └──────── Application Services ──┘
-                              │
-                   Project / Queue / Voice
-                              │
+         Gradio              REST        Streamable HTTP
+             |                |                |
+             +-------- Application Services --+
+                              |
+                 Persistent StudioJobManager
+                              |
+                    Project / Queue / Voice
+                              |
                          OmniVoice Core
 ```
 
-After the read-only server foundation is CI-green, the next implementation target is the **single-GPU async Job Manager**. Generation/preview/stability work must be serialized on one Kaggle GPU and exposed as jobs rather than long-lived HTTP requests.
+Public hosted deployments can use a stable Cloudflare named-tunnel hostname. Machine-facing REST/MCP requests use bearer scopes; public Gradio can use Basic auth or a trusted external access layer.
 
-The stable public hostname is implemented after the server/job contract is stable. ChatGPT, Claude and Antigravity will then configure one permanent MCP URL while Kaggle/Colab sessions may change underneath it.
+The target-only projection engine remains **EXPERIMENTAL** outside the production line. Projection-unit equivalence alone is not sufficient to enable it: a real baseline-vs-candidate TTS benchmark and quality/equivalence acceptance are still required.
 
 ## Architectural rule
 
