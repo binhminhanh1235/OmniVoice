@@ -9,6 +9,7 @@ from omnivoice.runtime_cache import (
     detect_runtime_cache,
     persist_runtime_cache,
     prepare_runtime_cache,
+    write_workspace_cache_metadata,
 )
 
 
@@ -222,3 +223,18 @@ def test_cache_status_reports_persistent_readiness(tmp_path):
     assert status["package_key"] == fp.package_key
     assert status["local_ready"] is True
     assert status["source_ready"] is True
+
+
+def test_workspace_metadata_records_reusable_cache_identity(tmp_path):
+    fp = fingerprint("sha-123")
+    layout = RuntimeCacheLayout(environment="kaggle", local_root=tmp_path / "cache")
+    prepared = prepare_runtime_cache(layout, fp)
+
+    path = write_workspace_cache_metadata(tmp_path / "studio", prepared)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["environment"] == "kaggle"
+    assert payload["cache_key"] == fp.key
+    assert payload["package_key"] == fp.package_key
+    assert payload["package_ref"] == "sha-123"
+    assert payload["local_namespace"] == str(prepared.local_namespace)
