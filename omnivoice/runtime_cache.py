@@ -375,3 +375,39 @@ def cache_status(
         ),
         "persist_namespace": str(target) if target else None,
     }
+
+
+def write_workspace_cache_metadata(
+    workspace: Path | str,
+    preparation: CachePreparation,
+) -> Path:
+    """Record reusable cache/runtime metadata beside the Studio workspace."""
+
+    root = Path(workspace).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / ".runtime-cache.json"
+    payload = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "environment": preparation.layout.environment,
+        "cache_key": preparation.fingerprint.key,
+        "package_key": preparation.fingerprint.package_key,
+        "package_ref": preparation.fingerprint.package_ref,
+        "cache_version": preparation.fingerprint.cache_version,
+        "fast_path": preparation.fast_path,
+        "local_namespace": str(preparation.local_namespace),
+        "source_root": (
+            str(preparation.layout.source_root)
+            if preparation.layout.source_root
+            else None
+        ),
+        "persist_root": (
+            str(preparation.layout.persist_root)
+            if preparation.layout.persist_root
+            else None
+        ),
+        "updated_at": _utc_now(),
+    }
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    temp.replace(path)
+    return path
