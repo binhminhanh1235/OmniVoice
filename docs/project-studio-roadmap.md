@@ -1,131 +1,458 @@
 # OmniVoice Project Studio roadmap
 
-This roadmap now prioritizes reliable long-form narration on Kaggle local GPU/SSD first, then an AI-native service layer while keeping the Gradio web UI.
+Last status review: 2026-09-08.
 
-## P0 — usable project workflow
+This roadmap is the canonical status page for the production-oriented OmniVoice Studio fork. It distinguishes code already merged to `master`, work under review, experimental work, and future plans.
 
-- [x] Persistent Project model
-- [x] `S01`, `S02`, ... Markdown parser
-- [x] Directive stripping (`WARM`, `SOFT`, `EMPHASIZE`, `NORMAL`)
-- [x] Project -> Section -> Beat -> Chunk hierarchy
-- [x] Separate section WAV files
-- [x] Robust per-chunk verification
-- [x] Checkpoint / resume
-- [x] Persistent `section-status.json` with crash-safe section resume
-- [x] Skip completed sections after reload; resume only incomplete sections
-- [x] Regenerate one chunk only
-- [x] Merge verified sections into `full.wav`
-- [x] Persistent Voice Library / cached `VoiceClonePrompt`
-- [x] Simple Gradio Project Studio
-- [x] Section/chunk status table
-- [x] Live per-section generation status
-- [x] Colab Project Studio launcher
-- [x] Persistent multi-project queue with continuous section-by-section rendering
-- [x] Queue crash recovery: completed projects/sections are skipped after runtime restart when the workspace still exists
-- [x] Cooperative pause after current section and continue-on-project-error policy
-- [x] Optional auto-merge per queued project
-- [x] Project-level render status derived from `section-status.json`
-- [x] Queue Project Browser filtered by `PENDING`, `GENERATING`, `NEEDS_REVIEW`, `FAILED`, `DONE`
-- [x] Default queue filter hides `DONE` and shows `PENDING + GENERATING`
-- [x] Hide projects already represented in the queue
-- [x] Bulk-add all filtered projects using each project's saved Studio settings
+## Status legend
 
-## P1 — narration quality and recovery
+- **MERGED / VERIFIED**: on `master` and covered by the relevant regression boundary.
+- **IN REVIEW**: implemented on a feature branch or PR but not yet production master.
+- **EXPERIMENTAL**: useful research/prototype code that must not be enabled by assumption.
+- **PLANNED**: accepted direction, not implemented yet.
 
-- [x] Voice Style Bank: `DEFAULT`, `WARM`, `SOFT`, `PRAYER`, optional `EMPHASIZE` variants
-- [x] Style Resolver with deterministic fallback
-- [x] Preview opening / middle / ending before full rendering
-- [x] Adaptive retry by failure reason: repetition, omission, pacing, text mismatch
-- [x] Pacing anomaly detector with global fallback and optional Whisper word timestamps
-- [x] Text Doctor: safe HTML/Unicode cleanup, diff, semantic review hints
-- [x] Voice Doctor: reference duration, level, silence, clipping, DC offset and noise/dynamic checks
-- [x] One-upload Voice Doctor -> Save Voice flow
-- [x] Voice Stability Score from three real clone probes with ASR/pacing checks
-- [x] Persistent Section Version History with play / snapshot / restore
-- [x] Automatic snapshots before chunk regeneration and forced section rerender
+## Current production baseline
 
-## P2 — efficiency and lower-friction setup
-
-1. [x] Auto Best Reference Segment: rank clean 3–10 second windows from long recordings, listen before selection, optional ASR transcript suggestion.
-2. [x] Hardware detection and quality presets (`SAFE`, `BALANCED`, `FAST`) without exposing a wall of generation parameters.
-   - hardware summary: CUDA, GPU, VRAM, compute capability, recommended ASR device;
-   - T4 / 16 GB recommendation: `BALANCED` + ASR on CPU;
-   - `SAFE`: 32 steps, 3 retries, adaptive retry + pacing guard + ASR verification;
-   - `BALANCED`: 28 steps, 2 retries, adaptive retry + pacing guard + ASR verification;
-   - `FAST`: 24 steps, 1 retry, no adaptive repair/pacing timestamps, but ASR text verification remains enabled;
-   - workspace default in `hardware-quality.json`, optional per-project override in `studio.json`.
-3. [x] Kaggle local execution workspace.
-   - automatic Kaggle detection;
-   - writable execution root: `/kaggle/working/OmniVoiceStudio`;
-   - `/kaggle/input` treated as read-only source material only;
-   - no Google Drive/rclone/remote persistence in this phase;
-   - dedicated Kaggle notebook;
-   - execution and future persistence kept as separate architectural layers.
-4. [ ] Remote persistence adapter for exporting/synchronizing the Kaggle execution workspace after the local-first path is stable.
-5. [ ] Cache reusable verification/preprocessing metadata and avoid repeated ASR/setup work.
-6. [ ] Cascade verification: cheap verifier first, stronger verifier only for borderline chunks, after benchmarking accuracy and memory cost.
-7. [ ] Same-language reference selection when one voice has multiple language variants.
-8. [ ] Benchmark acceleration options such as FlashInfer/CUDA graphs before enabling them by default.
-
-## P2.5 — AI-native OmniVoice while keeping Web UI
-
-The Gradio UI remains a first-class interface. AI-native clients use the same application services rather than duplicating generation logic.
-
-1. [x] Protocol-neutral `StudioService` application layer for runtime, projects, queue and capabilities.
-2. [x] Unified FastAPI server with Gradio mounted at `/ui`.
-3. [x] Read-only REST/OpenAPI foundation: `/health`, `/api/v1/capabilities`, `/api/v1/hardware`, projects and queue summaries.
-4. [ ] Async single-GPU Job Manager with persisted job state and cooperative cancellation/pause boundaries.
-5. [ ] Write REST API for preview, generate, queue, regenerate and merge using job IDs instead of long blocking requests.
-6. [ ] Job event stream (SSE) for section/chunk progress.
-7. [ ] MCP server mounted at `/mcp` using the same service/job layer.
-8. [ ] Stable hostname publishing path using a named tunnel; ChatGPT/Claude/Antigravity must never depend on random `*.gradio.live` URLs.
-9. [ ] API authentication/scopes independent from Gradio UI auth.
-10. [ ] Universal OmniVoice Skill describing safe production workflows and quality rules.
-11. [ ] Thin adapters/examples for ChatGPT, Claude Code and Antigravity.
-12. [ ] Optional persistent control plane + worker registry for reconnecting Kaggle/Colab workers without changing client configuration.
-
-## P3 — authoring and production tools
-
-1. [ ] Rich directive DSL (`PAUSE`, `SLOW`, `FAST`, `PITCH`, `VOICE`, combined tags).
-2. [ ] Per-line and phrase-level style overrides.
-3. [ ] Timeline and silence editor.
-4. [ ] WAV/MP3 export profiles.
-5. [ ] Project CLI runner for unattended local workflows.
-
-## Next priority
-
-Finish and validate the **AI-native server foundation** while preserving the existing Gradio workflow.
+At this snapshot:
 
 ```text
-                       OmniVoice Studio
-                              │
-             ┌────────────────┼────────────────┐
-             │                │                │
-           /ui             /api/v1           /mcp
-         Gradio              REST           planned
-             │                │                │
-             └──────── Application Services ──┘
-                              │
-                   Project / Queue / Voice
-                              │
-                         OmniVoice Core
+master:
+dfed08b5d2b26298b2417a92f904a862e2f83590
+
+tree:
+b956f59dd25470c49857c21879f9a63f70d86a22
 ```
 
-After the read-only server foundation is CI-green, the next implementation target is the **single-GPU async Job Manager**. Generation/preview/stability work must be serialized on one Kaggle GPU and exposed as jobs rather than long-lived HTTP requests.
+This baseline includes:
 
-The stable public hostname is implemented after the server/job contract is stable. ChatGPT, Claude and Antigravity will then configure one permanent MCP URL while Kaggle/Colab sessions may change underneath it.
+- English-first language selectors;
+- leading conjunction narration safeguard;
+- optional section-title narration;
+- unified project-first workspace;
+- benchmark framework;
+- existing Project Studio, recovery, AI-native server, MCP, tunnel and auth foundations.
 
-## Architectural rule
+Persistent hosted-runtime caching is tracked separately as **IN REVIEW** until merged.
 
-Script directives are model-agnostic intents. Do not expose unsupported OmniVoice instructions directly.
+## P0 - Production Project Studio foundation
+
+Status: **MERGED / VERIFIED**
+
+- [x] Persistent Project model.
+- [x] `S01`, `S02`, ... Markdown parser.
+- [x] Project -> Section -> Beat -> Chunk hierarchy.
+- [x] Separate section WAV files.
+- [x] Per-chunk generation and verification.
+- [x] Checkpoint/resume.
+- [x] Crash-safe `section-status.json`.
+- [x] Skip verified work after restart.
+- [x] Regenerate one chunk only.
+- [x] Render selected sections.
+- [x] Merge verified sections into final output.
+- [x] Persistent Voice Library / reusable `VoiceClonePrompt`.
+- [x] Voice variants / Style Bank.
+- [x] Preview before full render.
+- [x] Text Doctor.
+- [x] Voice Doctor.
+- [x] Voice Stability Score.
+- [x] Section Version History.
+- [x] Multi-project queue.
+- [x] Cooperative queue pause/recovery.
+- [x] Project status filters.
+- [x] Hardware detection and quality presets.
+- [x] Advanced Settings.
+- [x] Unified project-first workspace.
+- [x] Language dropdowns with English first.
+- [x] Optional `###` section-title narration.
+- [x] Leading conjunction safeguard for fragile starts such as `Or`, `And`, and `But`.
+
+### Production UX principle
+
+The primary workflow remains:
+
+```text
+Script
+  -> Voice
+  -> Preview
+  -> Render
+  -> Review
+  -> Export
+```
+
+Recovery, History, Quality, Advanced Settings, Queue and Storage support the same project rather than creating parallel workflows.
+
+## P1 - Safe performance optimization
+
+Status: **PARTLY MERGED / PARTLY PLANNED**
+
+### Benchmark framework
+
+Status: **MERGED / VERIFIED**
+
+- [x] Reproducible raw `model.generate` benchmark.
+- [x] RTF metrics.
+- [x] generated audio duration.
+- [x] model load time.
+- [x] CUDA peak allocation when available.
+- [x] CLI: `omnivoice-benchmark`.
+- [x] benchmark regression coverage.
+
+### Local-first Colab workspace
+
+Status: **SAFE CANDIDATE**
+
+Goal:
+
+- use local Colab VM storage for active generation;
+- restore/sync persistent project state through a persistence boundary;
+- avoid Drive FUSE in the render hot path;
+- preserve existing checkpoint/resume semantics.
+
+Before production merge:
+
+- [ ] benchmark local workspace vs direct Drive workspace;
+- [ ] validate restore/sync after runtime restart;
+- [ ] validate no project-state regression;
+- [ ] document worst-case unsynced interval and recovery behavior.
+
+### Lazy CPU ASR startup
+
+Status: **SAFE CANDIDATE**
+
+The core model already supports on-demand ASR loading when transcription is first required.
+
+Planned production acceptance:
+
+- [ ] compare Studio startup time before/after;
+- [ ] verify first ASR request loads correctly;
+- [ ] verify explicit CPU ASR behavior;
+- [ ] preserve eager accelerator ASR placement where requested;
+- [ ] run full Project Studio and long-form regression;
+- [ ] confirm no verification quality change.
+
+### Target-only inference
+
+Status: **EXPERIMENTAL**
+
+The `optimize` branch contains an experimental engine that projects audio logits only for target positions.
+
+Current evidence is not sufficient for production enablement.
+
+Required acceptance:
+
+- [ ] real GPU before/after benchmark;
+- [ ] same prompts/config/seeds where deterministic comparison is possible;
+- [ ] output/projection equivalence at all used positions;
+- [ ] real voice-clone TTS generation;
+- [ ] ASR WER/similarity comparison;
+- [ ] duration/pacing comparison;
+- [ ] perceptual A/B listening;
+- [ ] long-form project acceptance;
+- [ ] CUDA memory comparison;
+- [ ] no regression to training or stable inference APIs.
+
+**Rule:** do not merge or enable target-only inference solely because the mathematical projection test passes.
+
+## P2 - Persistent Colab/Kaggle startup caching
+
+Status: **IN REVIEW**
+
+Tracked implementation:
+
+```text
+PR #49
+feat/persistent-hosted-runtime-cache
+head 27cf233ebb93edd6ff3ad5c57045ec5637a32ffb
+```
+
+At the latest review checkpoint:
+
+- Notebook JSON validation: PASS.
+- Robust regression CI #300: PASS.
+
+The feature is still classified as **IN REVIEW** until it is merged to `master`.
+
+Acceptance scope:
+
+- [x] dependency/wheel cache implementation.
+- [x] pip cache implementation.
+- [x] Hugging Face/model cache implementation.
+- [x] Torch cache implementation.
+- [x] Whisper cache implementation.
+- [x] reusable workspace/cache metadata.
+- [x] cache version/fingerprint.
+- [x] invalidation path.
+- [x] exact source-revision wheel path.
+- [x] fast path.
+- [x] cold-start fallback.
+- [x] local SSD execution remains the generation hot path.
+- [ ] merge to master after final review.
+- [ ] verify post-merge exact-head CI.
+- [ ] add a user-facing measured cold-start vs warm-start table from real Colab/Kaggle runs.
+
+### Follow-up cache work
+
+Status: **PLANNED**
+
+- [ ] cache reusable verification/preprocessing metadata.
+- [ ] avoid repeated work when script/reference/config fingerprint is unchanged.
+- [ ] expose cache health/invalidated reason in Studio diagnostics.
+- [ ] document cache size and cleanup strategy.
+
+## P3 - AI-native Studio
+
+Status: **FOUNDATION MERGED, COMMAND SURFACE PARTIAL**
+
+The Gradio UI remains first-class. REST and MCP use shared service/job layers rather than reimplementing TTS.
+
+### Application and server foundation
+
+Status: **MERGED / VERIFIED**
+
+- [x] protocol-neutral `StudioService`.
+- [x] command service boundary.
+- [x] unified FastAPI host.
+- [x] Gradio mounted at `/ui`.
+- [x] health/capabilities/hardware endpoints.
+- [x] project/queue read APIs.
+- [x] OpenAPI docs.
+
+### Persistent Job Manager
+
+Status: **MERGED / VERIFIED**
+
+- [x] single-worker GPU job serialization.
+- [x] persistent `jobs.json`.
+- [x] durable event history.
+- [x] idempotency keys.
+- [x] cooperative cancellation.
+- [x] restart recovery semantics.
+- [x] async project generation.
+
+### Write REST API
+
+Status: **PARTIAL**
+
+Merged:
+
+- [x] resumable project/section generation returning `job_id`.
+- [x] cooperative job cancellation.
+
+Planned:
+
+- [ ] preview job endpoint.
+- [ ] queue mutation endpoints.
+- [ ] regenerate chunk endpoint.
+- [ ] merge/export endpoint.
+- [ ] voice/diagnostic command endpoints where useful.
+- [ ] stable command schema/versioning for external clients.
+
+### SSE
+
+Status: **MERGED / VERIFIED**
+
+- [x] `GET /api/v1/jobs/{job_id}/stream`.
+- [x] durable replay.
+- [x] `Last-Event-ID` resume.
+- [x] heartbeat.
+- [x] terminal stream close.
+
+### MCP
+
+Status: **MERGED / VERIFIED**
+
+Current task-oriented tools:
+
+- [x] `studio_status`.
+- [x] `list_projects`.
+- [x] `inspect_project`.
+- [x] `queue_status`.
+- [x] `generate_project`.
+- [x] `get_job`.
+- [x] `cancel_job`.
+
+Resources:
+
+- [x] `omnivoice://projects/{project_id}`.
+- [x] `omnivoice://queue`.
+
+Planned:
+
+- [ ] preview tool.
+- [ ] regenerate tool.
+- [ ] merge/export tool.
+- [ ] explicit queue mutation tools after REST command contracts stabilize.
+
+### Stable hostname / tunnel
+
+Status: **MERGED / VERIFIED**
+
+- [x] remotely-managed Cloudflare Tunnel support.
+- [x] `--tunnel`.
+- [x] `--public-url`.
+- [x] stable `/ui`, `/api/v1`, `/mcp`.
+- [x] tunnel token passed through a private temporary token file.
+- [x] MCP host/origin configuration from public URL.
+
+### Authentication
+
+Status: **MERGED / VERIFIED**
+
+Machine/API auth:
+
+- [x] bearer token.
+- [x] `omnivoice:read`.
+- [x] `omnivoice:generate`.
+- [x] `omnivoice:queue`.
+- [x] `omnivoice:mcp`.
+- [x] `omnivoice:admin`.
+- [x] constant-time token comparison.
+- [x] 401 vs 403 semantics.
+
+UI protection:
+
+- [x] username/password configuration.
+- [x] fail-closed public deployment checks.
+- [x] explicit trusted external UI auth boundary.
+
+### AI client integration
+
+Status: **PLANNED**
+
+- [ ] Universal OmniVoice Skill describing safe production workflows.
+- [ ] ChatGPT integration example.
+- [ ] Claude Code integration example.
+- [ ] generic MCP client example.
+- [ ] Antigravity/other agent example where applicable.
+- [ ] sample idempotent long-running render workflow.
+
+### Optional control plane
+
+Status: **PLANNED**
+
+Goal:
+
+```text
+AI clients
+    |
+stable control endpoint
+    |
+worker registry / routing
+    |
+ephemeral Colab/Kaggle workers
+```
+
+Planned:
+
+- [ ] worker registration.
+- [ ] heartbeat/offline state.
+- [ ] reconnect without client URL changes.
+- [ ] job assignment/recovery contract.
+- [ ] authentication between control plane and workers.
+
+## P4 - Verification efficiency and voice intelligence
+
+Status: **PLANNED**
+
+### Verification cache
+
+- [ ] fingerprint text/reference/settings.
+- [ ] reuse safe preprocessing metadata.
+- [ ] invalidate on meaningful input/config changes.
+
+### Cascade verifier
+
+- [ ] cheap verifier first.
+- [ ] stronger verifier only for borderline chunks.
+- [ ] benchmark accuracy vs memory/latency before enablement.
+
+### Same-language reference selection
+
+- [ ] when one voice has multiple language variants, prefer same-language reference.
+- [ ] deterministic fallback when exact language variant is unavailable.
+- [ ] preserve explicit user-selected variant.
+
+## P5 - Authoring and production tools
+
+Status: **PLANNED**
+
+- [ ] richer directive DSL: `PAUSE`, `SLOW`, `FAST`, `PITCH`, `VOICE`, combined tags.
+- [ ] line-level style overrides.
+- [ ] phrase-level style overrides.
+- [ ] timeline editor.
+- [ ] silence editor.
+- [ ] WAV export profiles.
+- [ ] MP3 export profiles.
+- [ ] unattended project CLI runner.
+- [ ] production manifest/export bundle for downstream editors.
+
+## P6 - Upstream drift and compatibility protection
+
+Status: **NO CURRENT UPSTREAM DRIFT, GUARD PLANNED**
+
+Latest checked upstream:
+
+```text
+k2-fsa/OmniVoice master:
+08be0b4ccbac3e13e374e86fbfead4b4cac343e2
+```
+
+At the review checkpoint, that commit is also the fork merge-base:
+
+```text
+fork ahead: 348 commits
+fork behind: 0 commits
+```
+
+Therefore there is no useful upstream delta to merge right now.
+
+Planned guard:
+
+- [ ] CI/report job that records upstream HEAD and merge-base.
+- [ ] fail or warn when fork becomes behind upstream.
+- [ ] classify upstream changes by model/tokenizer/inference/training/dependency/docs.
+- [ ] require regression protection before integrating risky upstream changes.
+- [ ] maintain a compatibility note for each upstream sync.
+- [ ] never blindly merge upstream master into the production fork.
+
+## Next production order
+
+1. Finish review and merge persistent hosted-runtime caching.
+2. Re-check post-merge master CI and real warm/cold hosted-runtime measurements.
+3. Extract and validate lazy CPU ASR startup as a separate safe optimization.
+4. Validate local-first Colab workspace with measured I/O/startup improvement.
+5. Update all AI-native docs to the actual merged Job Manager/SSE/MCP/tunnel/auth state.
+6. Add upstream drift guard.
+7. Add missing write REST/MCP commands.
+8. Add Universal OmniVoice Skill and agent examples.
+9. Continue verification/cache intelligence.
+10. Evaluate target-only inference only after real quality acceptance.
+
+## Architectural rules
+
+### Automatic acceleration must not change truthfulness
+
+A faster path is accepted only when it preserves output/quality semantics or has an explicit documented trade-off.
+
+### Remote persistence is not the render hot path
+
+Hosted runtimes should generate on local SSD, then sync/export through a persistence boundary.
+
+### Long-running commands return durable job IDs
+
+REST/MCP should not keep one request/tool call open for an entire long render when the Job Manager can own the work.
+
+### Script directives are model-agnostic intents
 
 ```text
 [WARM]
    -> generic style intent
    -> style resolver
-      -> matching Voice Library variant if available
-      -> documented native OmniVoice instruct when supported
-      -> conservative pacing/pause fallback
+      -> matching Voice Library variant when available
+      -> documented native OmniVoice attribute when supported
+      -> conservative delivery fallback
 ```
 
-This keeps saved scripts portable to future TTS backends.
+### Experimental inference stays isolated
+
+Benchmark and unit equivalence are necessary but not sufficient. Real TTS quality acceptance is required before production enablement.

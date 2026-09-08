@@ -1,4 +1,4 @@
-# OmniVoice 🌍
+# OmniVoice 🌍 + OmniVoice Studio
 
 <p align="center">
   <img width="200" height="200" alt="OmniVoice" src="https://zhu-han.github.io/omnivoice/pics/omnivoice.jpg" />
@@ -7,405 +7,417 @@
 <p align="center">
   <a href="https://huggingface.co/k2-fsa/OmniVoice"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-FFD21E" alt="Hugging Face Model"></a>
   &nbsp;
-  <a href="https://huggingface.co/spaces/k2-fsa/OmniVoice"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space-blue" alt="Hugging Face Space"></a>
-  &nbsp;
   <a href="https://arxiv.org/abs/2604.00688"><img src="https://img.shields.io/badge/arXiv-Paper-B31B1B.svg"></a>
   &nbsp;
-  <a href="https://zhu-han.github.io/omnivoice"><img src="https://img.shields.io/badge/GitHub.io-Demo_Page-blue?logo=GitHub&style=flat-square"></a>
-  &nbsp;
-  <a href="https://colab.research.google.com/github/k2-fsa/OmniVoice/blob/master/docs/OmniVoice.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
+  <a href="https://zhu-han.github.io/omnivoice"><img src="https://img.shields.io/badge/GitHub.io-Upstream_Demo-blue?logo=GitHub&style=flat-square"></a>
 </p>
 
-OmniVoice is a state-of-the-art massively multilingual zero-shot text-to-speech (TTS) model supporting over 600 languages. Built on a novel diffusion language model-style architecture, it generates high-quality speech with superior inference speed, supporting voice cloning and voice design.
+> **Fork note:** this repository extends the upstream [k2-fsa/OmniVoice](https://github.com/k2-fsa/OmniVoice) model with **OmniVoice Studio**, a production-oriented long-form narration workspace, recovery layer, hosted-runtime workflow, REST/SSE/MCP server, and operational tooling. Model attribution, license, paper, and upstream links remain unchanged.
 
-**Contents**: [Key Features](#key-features) | [Installation](#installation) | [Quick Start](#quick-start) | [Python API](#python-api) | [Command-Line Tools](#command-line-tools) | [Training & Evaluation](#training--evaluation) | [Discussion](#discussion--communication) | [Citation](#citation)
+**Languages:** English | [Tiếng Việt](README.vi.md)
 
-## Key Features
+**Start here:** [Compact Vietnamese guide](docs/GUIDE-COMPACT.vi.md) | [Full Vietnamese guide](docs/GUIDE-FULL.vi.md) | [Studio roadmap](docs/project-studio-roadmap.md) | [Notebooks](notebooks/README.md)
 
-- **600+ Languages Supported**: The broadest language coverage among zero-shot TTS models ([full list](docs/languages.md)).
-- **Voice Cloning**: State-of-the-art voice cloning quality.
-- **Voice Design**: Control voices via assigned speaker attributes (gender, age, pitch, dialect/accent, whisper, etc.).
-- **Fine-grained Control**: Non-verbal symbols (e.g., `[laughter]`) and pronunciation correction via pinyin or phonemes.
-- **Fast Inference**: RTF as low as 0.025 (40x faster than real-time).
-- **Diffusion Language Model-style Architecture**: A clean, streamlined, and scalable design that delivers both quality and speed.
+OmniVoice is a massively multilingual zero-shot text-to-speech model supporting more than 600 languages. This fork keeps the core voice cloning, voice design, multilingual inference, pronunciation control, and training/evaluation stack, then adds a project-first Studio for reliable production of long-form narration.
 
----
+## What this repository adds
+
+### Production Studio
+
+- **Unified project-first workspace** for Script, Voice, Preview, Render, Review, Export, History, Quality, Advanced Settings, and Storage.
+- **Long-form project model**: Project -> Section -> Beat -> Chunk, with persistent manifests and section WAVs.
+- **Crash-safe resume** using durable section/chunk state. Completed work is skipped after restart.
+- **Targeted recovery**: regenerate one chunk or selected sections instead of rerendering the whole project.
+- **Optional section-title narration** while keeping Markdown headings as metadata by default.
+- **Leading conjunction protection** for fragile sentence starts such as "Or", "And", and "But".
+- **Language selectors** across Studio workflows with English prioritized first while preserving backend language IDs.
+- **Voice Library and Style Bank** with reusable voice-clone prompts and variants such as DEFAULT, WARM, SOFT, PRAYER, and EMPHASIZE.
+- **Text Doctor, Voice Doctor, Voice Stability, preview, version history, quality presets, and advanced generation settings**.
+- **Persistent multi-project queue** with pause/resume and project status filtering.
+- **Local-first hosted execution** for Kaggle and Colab so active generation stays on local SSD rather than a remote filesystem.
+
+### AI-native Studio server
+
+One process can expose:
+
+```text
+/ui                         Gradio Studio
+/api/v1                     REST / OpenAPI
+/api/v1/jobs/{id}/stream    Server-Sent Events
+/mcp                        Streamable HTTP MCP
+/health                     Health
+/docs                       OpenAPI docs
+```
+
+Implemented production foundations include:
+
+- persistent single-GPU Job Manager;
+- resumable async project generation;
+- idempotency keys;
+- cooperative cancellation;
+- durable job events and SSE replay;
+- task-oriented MCP tools;
+- stable Cloudflare named-tunnel support;
+- scoped bearer authentication for machine APIs;
+- optional Basic Auth protection for the Gradio UI.
+
+### Performance and hosted-runtime work
+
+- Reproducible benchmark framework with RTF, audio duration, model load time, and CUDA peak allocation.
+- Kaggle local SSD workspace and dual-GPU-aware ASR placement.
+- Persistent Colab/Kaggle dependency, model, and Whisper caching is being integrated separately and is **not considered merged until its PR lands on master**.
+- Experimental target-only audio projection remains **off production master** until real TTS quality and end-to-end benchmark acceptance are proven.
+
+## Current status
+
+| Area | Status |
+|---|---|
+| Core OmniVoice inference and training | Merged |
+| Robust long-form Project Studio | Merged |
+| Unified project-first workspace | Merged |
+| English-first language selectors | Merged |
+| Leading "Or" pronunciation protection | Merged |
+| Optional section-title narration | Merged |
+| Job Manager + async generation | Merged |
+| SSE job progress | Merged |
+| MCP server | Merged |
+| Stable named tunnel | Merged |
+| API scopes / bearer auth | Merged |
+| Benchmark framework | Merged |
+| Persistent hosted-runtime cache | In review |
+| Target-only inference | Experimental |
+| Additional write APIs, agent adapters, control plane | Planned |
+
+See [docs/project-studio-roadmap.md](docs/project-studio-roadmap.md) for the exact plan and status boundaries.
 
 ## Installation
 
-Choose **one** of the following methods: **pip** or **uv**.
+### Recommended: install this fork
 
-### pip
+Create a fresh virtual environment, install the appropriate PyTorch build for your machine, then install this repository.
 
-> We recommend using a fresh virtual environment (e.g., `conda`, `venv`, etc.) to avoid conflicts.
-
-**Step 1**: Install PyTorch
-
-<details>
-<summary>NVIDIA GPU</summary>
+#### NVIDIA CUDA 12.8 example
 
 ```bash
-# Install pytorch with your CUDA version, e.g.
-pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
+python -m venv .venv
+source .venv/bin/activate
+
+pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 \
+  --extra-index-url https://download.pytorch.org/whl/cu128
+
+pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
 ```
-> See [PyTorch official site](https://pytorch.org/get-started/locally/) for other versions installation.
 
-</details>
+On Windows, activate with `.venv\Scripts\activate`.
 
-<details>
-<summary>Apple Silicon</summary>
+#### Apple Silicon
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install torch==2.8.0 torchaudio==2.8.0
+pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
 ```
 
-</details>
+Apple Silicon can use `device_map="mps"` for direct Python inference. Production throughput is still best on a supported accelerator environment.
 
-<details>
-<summary>Intel Arc GPU (XPU)</summary>
-
-Intel Arc GPUs (Alchemist and Battlemage architectures) are supported via PyTorch's XPU backend.
-
-1. Install the [Intel GPU drivers](https://dgpu-docs.intel.com/driver/installation.html) for your OS.
-
-2. Install PyTorch with XPU support from Intel's wheel index:
+#### Development install
 
 ```bash
-pip install torch torchaudio --index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
-```
-
-> See [Intel's PyTorch XPU guide](https://intel.github.io/intel-extension-for-pytorch/xpu/latest/) for version-specific instructions.
-
-3. Verify the backend is working:
-
-```bash
-python -c "import torch; print(torch.xpu.is_available(), torch.xpu.device_count())"
-```
-
-**Notes**:
-- `flash_attn` is not available on XPU; the model automatically falls back to SDPA.
-- Training with packed sequences (`flex_attention`) has partial XPU support; single-GPU SDPA training should work.
-- Tested on Arc A310 (Alchemist, 4 GB) and Arc Pro B50 (Battlemage, 16 GB).
-
-</details>
-
-**Step 2**: Install OmniVoice (choose one)
-
-```bash
-# From PyPI (stable release)
-pip install omnivoice
-
-# From the latest source on GitHub (no need to clone)
-pip install git+https://github.com/k2-fsa/OmniVoice.git
-
-# For development (clone first, editable install)
-git clone https://github.com/k2-fsa/OmniVoice.git
+git clone https://github.com/binhminhanh1235/OmniVoice.git
 cd OmniVoice
 pip install -e .
 ```
 
-### uv
+The upstream PyPI package is useful for core OmniVoice features, but the Studio additions documented here track this fork's `master`.
 
-Clone the repository and sync dependencies:
+## Fastest Studio start
+
+### Local Gradio Studio
 
 ```bash
-git clone https://github.com/k2-fsa/OmniVoice.git
-cd OmniVoice
-uv sync
+omnivoice-project-studio \
+  --workspace ./OmniVoiceStudio \
+  --port 7860
 ```
 
-> **Tip**: Can use mirror with `uv sync --default-index "https://mirrors.aliyun.com/pypi/simple"`
+Use `--share` only when you intentionally want a temporary Gradio public URL.
 
----
+### Unified UI + REST + SSE + MCP server
 
-## Quick Start
+```bash
+omnivoice-studio serve \
+  --workspace ./OmniVoiceStudio \
+  --host 127.0.0.1 \
+  --port 8000
+```
 
-Try OmniVoice without coding:
+Open:
 
-- Launch the local web UI: `omnivoice-demo --ip 0.0.0.0 --port 8001`
+- UI: `http://127.0.0.1:8000/ui`
+- API docs: `http://127.0.0.1:8000/docs`
+- MCP: `http://127.0.0.1:8000/mcp`
+- Health: `http://127.0.0.1:8000/health`
 
-- Or try it directly on [HuggingFace Space](https://huggingface.co/spaces/k2-fsa/OmniVoice)
+## Hosted notebooks
 
-- Or run it in Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/k2-fsa/OmniVoice/blob/master/docs/OmniVoice.ipynb)
+Maintained notebooks are under [notebooks/](notebooks/).
 
-> If you have trouble connecting to HuggingFace when downloading the pre-trained models, set `export HF_ENDPOINT="https://hf-mirror.com"` before running.
+| Environment | Recommended notebook | Execution model |
+|---|---|---|
+| Colab | `OmniVoice_Project_Studio_Colab.ipynb` | local execution workspace with persistence boundary |
+| Kaggle | `OmniVoice_Project_Studio_Kaggle.ipynb` | `/kaggle/working` local SSD, dual-T4 aware |
+| Colab simple | `OmniVoice_Project_Studio_Colab_Gradio.ipynb` | temporary Gradio workflow |
+| Kaggle simple | `OmniVoice_Project_Studio_Kaggle_Gradio.ipynb` | local SSD + temporary Gradio workflow |
 
-For full usage, see the [Python API](#python-api) and [Command-Line Tools](#command-line-tools) sections below.
+Active generation should stay on local SSD. Remote Drive, Dataset, or cloud storage is a persistence/export boundary, not the render hot path.
 
----
+## Project workflow
 
-## Python API
+A typical script:
 
-OmniVoice supports three generation modes. All features in this section are also available via [command-line tools](#command-line-tools).
+```markdown
+# Video title
 
-### Voice Cloning
+## S01 - 0:00-0:45
+### Opening
 
-Clone a voice from a short reference audio. Provide `ref_audio` and `ref_text`:
+[WARM] Not every time you step in, you are actually helping.
+
+## S02 - 0:45-1:30
+[SOFT] The question is what happens next.
+Do they own what is true?
+Or do they rewrite the conversation until you become the villain?
+```
+
+Studio provides:
+
+1. **Script**: paste and parse the full Markdown project.
+2. **Voice**: create or reuse a saved voice and variant.
+3. **Preview**: listen to representative samples.
+4. **Render**: generate all or selected sections.
+5. **Review**: inspect status and regenerate only failed chunks.
+6. **Export**: merge verified sections and export production audio.
+7. **Resume**: restart the runtime and continue unfinished work.
+
+By default, Markdown section titles are not spoken. Enable **Read section titles (###)** when a project should narrate them.
+
+## Quality presets
+
+The primary presets are:
+
+| Preset | Goal |
+|---|---|
+| SAFE | maximum verification and recovery effort |
+| BALANCED | recommended production default |
+| FAST | lower generation/retry effort while retaining text verification |
+
+Advanced Settings can override selected behavior per project without replacing the preset as the normal configuration path.
+
+## Voice cloning Python API
 
 ```python
-from omnivoice import OmniVoice
 import soundfile as sf
 import torch
+from omnivoice import OmniVoice
 
 model = OmniVoice.from_pretrained(
     "k2-fsa/OmniVoice",
     device_map="cuda:0",
-    dtype=torch.float16
+    dtype=torch.float16,
 )
-# Apple Silicon users: use device_map="mps" instead
-# Intel Arc GPU users: use device_map="xpu" instead
 
 audio = model.generate(
-    text="Hello, this is a test of zero-shot voice cloning.",
+    text="Hello, this is a voice-cloning test.",
     ref_audio="ref.wav",
-    ref_text="Transcription of the reference audio.",
-) # audio is a list of `np.ndarray` with shape (T,) at 24 kHz.
+    ref_text="Exact transcript of the reference audio.",
+    language="en",
+)
 
-# If you don't want to input `ref_text` manually, you can directly omit the `ref_text`.
-# The model will use Whisper ASR to auto-transcribe it. To use a local copy (or
-# a different Whisper model), pass `asr_model_name="..."` to `from_pretrained`.
-# To control which device Whisper is loaded on (e.g. another GPU in multi-GPU
-# setups, or the CPU), pass `asr_device="cuda:1"` (or `"cpu"`).
-
-sf.write("out.wav", audio[0], 24000)
+sf.write("out.wav", audio[0], model.sampling_rate)
 ```
 
-#### Reusing a cloned voice across sessions
-
-Encode the reference audio once, save the resulting prompt, and skip the
-audio loading / auto-transcription steps in later sessions:
+### Reuse the voice prompt
 
 ```python
 prompt = model.create_voice_clone_prompt(
-    ref_audio="ref.wav", ref_text="Transcription of the reference audio."
+    ref_audio="ref.wav",
+    ref_text="Exact transcript of the reference audio.",
 )
 prompt.save("my_voice.pt")
+```
 
-# Later, in a new session:
+Later:
+
+```python
 from omnivoice import VoiceClonePrompt
 
 prompt = VoiceClonePrompt.load("my_voice.pt")
-audio = model.generate(text="Hello again!", voice_clone_prompt=prompt)
-```
-
-> **Tips**
->
-> - Use a 3–10 seconds reference audio clip. Longer audio slows down inference and may degrade cloning quality.
-> - For standard pronunciation, use a reference audio in the **same language** as the target speech. In cross-lingual voice cloning (i.e., the reference audio and target speech are in different languages), the generated speech will carry an accent from the reference audio's language.
-> - For better results with Arabic numerals, normalize them to words first (e.g., "123" → "one hundred twenty-three"). You can pass `normalize_text=True` to `generate()` to do this automatically (opt-in; install the extra with `pip install "omnivoice[tn]"`, which pulls in [WeTextProcessing](https://github.com/wenet-e2e/WeTextProcessing)):
->
->   ```python
->   # "I have 2345 apples." is read correctly instead of digit-by-digit.
->   audio = model.generate(text="I have 2345 apples.", normalize_text=True)
->   ```
->
->   Chinese and English use WeTextProcessing; other languages fall back to `num2words` for integers. Inline control syntax (`[laughter]`, `[B EY1 S]`, pinyin tone markers) is preserved. On macOS (Apple Silicon), `pynini` has no wheel — install it via `conda install -c conda-forge pynini` first.
->
-> For more tips, see [docs/tips.md](docs/tips.md).
-
-### Voice Design
-
-Describe the desired voice with speaker attributes — no reference audio needed.
-Supported attributes: **gender** (male/female), **age** (child to elderly),
-**pitch** (very low to very high), **style** (whisper), **English accent**
-(American, British, etc.), and **Chinese dialect** (四川话, 陕西话, etc.).
-Attributes are comma-separated and freely combinable across categories.
-
-```python
 audio = model.generate(
-    text="Hello, this is a test of zero-shot voice design.",
-    instruct="female, low pitch, british accent",
+    text="This session does not need to re-encode the reference.",
+    voice_clone_prompt=prompt,
+    language="en",
 )
 ```
 
-> **Note**: The model is primarily trained on the voice cloning task, so voice cloning is the most stable mode. Voice design is trained on Chinese and English data only. It can generalize to other languages, but may produce unstable results for some low-resource languages or edge cases.
+## Core generation modes
 
-See [docs/voice-design.md](docs/voice-design.md) for the full attribute
-reference, Chinese equivalents, and usage tips.
+OmniVoice still supports the upstream generation modes:
 
-### Auto Voice
+- **Voice cloning** with reference audio;
+- **Voice design** with supported speaker attributes;
+- **Auto voice** without a reference;
+- **Non-verbal controls** such as `[laughter]`;
+- **English pronunciation overrides** using CMU phonemes;
+- **Chinese pronunciation overrides** using pinyin with tones;
+- optional text normalization via `omnivoice[tn]`.
 
-Let the model choose a voice automatically:
+See [docs/generation-parameters.md](docs/generation-parameters.md), [docs/voice-design.md](docs/voice-design.md), and [docs/tips.md](docs/tips.md).
 
-```python
-audio = model.generate(text="This is a sentence without any voice prompt.")
+## Command-line tools
+
+| Command | Purpose |
+|---|---|
+| `omnivoice-project-studio` | production Project Studio UI |
+| `omnivoice-studio serve` | unified Gradio + REST + SSE + MCP server |
+| `omnivoice-benchmark` | reproducible inference benchmark |
+| `omnivoice-demo` | interactive robust demo |
+| `omnivoice-demo-legacy` | legacy upstream-style demo |
+| `omnivoice-infer` | single-item inference |
+| `omnivoice-infer-batch` | batch / multi-GPU inference |
+| `omnivoice-merge-lora` | LoRA merge utility |
+
+Run any command with `--help` for its current arguments.
+
+## REST jobs
+
+Submit generation asynchronously:
+
+```http
+POST /api/v1/projects/my-project/generate
+Idempotency-Key: render-my-project-v1
+Content-Type: application/json
+
+{
+  "voice_name": "Narrator",
+  "voice_variant": "AUTO",
+  "language": "en",
+  "sections": ["S01", "S02"],
+  "resume": true,
+  "strict": false,
+  "quality_preset": "BALANCED"
+}
 ```
 
-### Generation Parameters
+Track it through:
 
-All above three modes share the same `model.generate()` API. You can further control the generation behavior via keyword arguments:
-
-```python
-audio = model.generate(
-    text="...",
-    num_step=32,  # diffusion steps (or 16 for faster inference)
-    speed=1.0,     # speed factor (>1.0 faster, <1.0 slower)
-    duration=10.0, # pre-synthesis audio-token budget (overrides speed)
-    # ... more options
-)
-```
-See more detailed control in [docs/generation-parameters.md](docs/generation-parameters.md).
-
-### Non-Verbal & Pronunciation Control
-
-OmniVoice supports inline **non-verbal symbols** and **pronunciation correction** within the input text.
-
-**Non-verbal symbols**: Insert tags like `[laughter]` directly in the text to add expressive non-verbal sounds.
-
-```python
-audio = model.generate(text="[laughter] You really got me. I didn't see that coming at all.")
+```text
+GET  /api/v1/jobs/{job_id}
+GET  /api/v1/jobs/{job_id}/events
+GET  /api/v1/jobs/{job_id}/stream
+POST /api/v1/jobs/{job_id}/cancel
 ```
 
-Supported tags: `[laughter]`, `[sigh]`, `[confirmation-en]`, `[question-en]`, `[question-ah]`, `[question-oh]`, `[question-ei]`, `[question-yi]`, `[surprise-ah]`, `[surprise-oh]`, `[surprise-wa]`, `[surprise-yo]`, `[dissatisfaction-hnn]`.
+## MCP
 
-**Pronunciation control (Chinese)**: Use pinyin with tone numbers to correct specific character pronunciations.
+The mounted Streamable HTTP MCP endpoint is:
 
-```python
-audio = model.generate(text="这批货物打ZHE2出售后他严重SHE2本了，再也经不起ZHE1腾了。")
+```text
+http://HOST:PORT/mcp
 ```
 
-**Pronunciation control (English)**: Use [CMU pronunciation dictionary](https://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict/cmudict.0.7a)  (uppercase, in brackets) to override default English pronunciations.
+Initial task-oriented tools include:
 
-```python
-audio = model.generate(text="He plays the [B EY1 S] guitar while catching a [B AE1 S] fish.")
+```text
+studio_status
+list_projects
+inspect_project
+queue_status
+generate_project
+get_job
+cancel_job
 ```
 
----
+Generation returns a durable `job_id` instead of holding an MCP call open for the full TTS render.
 
-## Command-Line Tools
+## Authentication and stable public hosting
 
-Three CLI entry points are provided. The single-item and batch tools expose voice cloning, voice design, auto voice, and generation parameters as command-line arguments. The interactive demo exposes the most commonly used controls in a web UI.
+For a public fixed hostname, use a named Cloudflare Tunnel and machine/API authentication.
 
-| Command | Description | Source |
-|---|---|---|
-| `omnivoice-demo` | Interactive Gradio web demo | [omnivoice/cli/demo.py](omnivoice/cli/demo.py) |
-| `omnivoice-infer` | Single-item inference | [omnivoice/cli/infer.py](omnivoice/cli/infer.py) |
-| `omnivoice-infer-batch` | Batch inference across multiple GPUs | [omnivoice/cli/infer_batch.py](omnivoice/cli/infer_batch.py) |
-
-### Demo
+Example environment:
 
 ```bash
-omnivoice-demo --ip 0.0.0.0 --port 8001
+export OMNIVOICE_API_TOKEN="replace-with-a-strong-secret"
+export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
+export OMNIVOICE_UI_USERNAME="studio"
+export OMNIVOICE_UI_PASSWORD="replace-with-a-strong-password"
+export CLOUDFLARE_TUNNEL_TOKEN="..."
+export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
 ```
 
-Provides a web UI for voice cloning and voice design. See `omnivoice-demo --help` for all options.
-
-### Single Inference
+Then:
 
 ```bash
-# Voice Cloning
-# ref_text can be omitted (Whisper will auto-transcribe ref_audio to get it).
-omnivoice-infer \
-    --model k2-fsa/OmniVoice \
-    --text "This is a test for text to speech." \
-    --ref_audio ref.wav \
-    --ref_text "Transcription of the reference audio." \
-    --output hello.wav
-
-# Voice Design
-omnivoice-infer --model k2-fsa/OmniVoice \
-    --text "This is a test for text to speech." \
-    --instruct "male, British accent" \
-    --output hello.wav
-
-# Auto Voice
-omnivoice-infer \
-    --model k2-fsa/OmniVoice \
-    --text "This is a test for text to speech."\
-    --output hello.wav
+omnivoice-studio serve \
+  --workspace ./OmniVoiceStudio \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tunnel \
+  --public-url https://omnivoice.example.com
 ```
 
-### Batch Inference
+Do not commit tokens or passwords. The tunnel implementation uses a private temporary token file rather than placing the raw tunnel token on the child-process command line.
 
-`omnivoice-infer-batch` can distribute batch inference across multiple GPUs, designed for large-scale TTS tasks.
+See [docs/stable-tunnel.md](docs/stable-tunnel.md) and [docs/ai-native-mcp.md](docs/ai-native-mcp.md).
+
+## Benchmarking
+
+Use the production benchmark framework before changing inference behavior:
 
 ```bash
-omnivoice-infer-batch \
-    --model k2-fsa/OmniVoice \
-    --test_list test.jsonl \
-    --res_dir results/
+omnivoice-benchmark \
+  --model k2-fsa/OmniVoice \
+  --device cuda:0 \
+  --preset BALANCED \
+  --repeat 2 \
+  --output benchmark.json
 ```
 
-The test list is a JSONL file where each line is a JSON object:
-```json
-{"id": "sample_001", "text": "Hello world", "ref_audio": "/path/to/ref.wav", "ref_text": "Reference transcript", "instruct": "female, british accent", "language_id": "en", "duration": 10.0, "speed": 1.0}
-```
-Only `id` and `text` are mandatory fields. `ref_audio` and `ref_text` are used in voice cloning mode. `instruct` is used in voice design mode. If no reference audio or instruct are provided, the model will generate text in a random voice.
+The framework reports model load time, generated audio duration, RTF, and CUDA peak allocation when available.
 
-`language_id`, `duration`, and `speed` are optional. `duration` (in seconds) sets the pre-synthesis audio-token budget; post-processing can change the final WAV duration. `speed` controls the speaking rate and is ignored when `duration` is set.
+**Production rule:** speedups are not merged by assumption. Experimental inference must demonstrate measurable improvement plus output/projection equivalence and real TTS quality acceptance.
 
-### FlashInfer Acceleration
+## Documentation map
 
-Inference can be accelerated ~2-2.9x losslessly with [FlashInfer](https://github.com/flashinfer-ai/flashinfer) kernels (sequence packing for the CFG cond/uncond pair, fused RMSNorm/RoPE/GEMM kernels, and optional CUDA graphs).
+- [Compact Vietnamese guide](docs/GUIDE-COMPACT.vi.md)
+- [Full Vietnamese guide](docs/GUIDE-FULL.vi.md)
+- [Project Studio roadmap](docs/project-studio-roadmap.md)
+- [Project Studio details](docs/project-studio.md)
+- [AI-native foundation](docs/ai-native-foundation.md)
+- [SSE](docs/ai-native-sse.md)
+- [MCP](docs/ai-native-mcp.md)
+- [Stable tunnel](docs/stable-tunnel.md)
+- [Hardware and quality presets](docs/hardware-quality-presets.md)
+- [Advanced settings](docs/advanced-settings.md)
+- [Kaggle workspace](docs/kaggle-local-workspace.md)
+- [Notebooks](notebooks/README.md)
 
-**Installation** (NVIDIA GPUs; pick the index matching your CUDA version, e.g. cu128 for PyTorch built with CUDA 12.8):
+## Upstream compatibility policy
 
-```bash
-pip install flashinfer-python==0.6.15.post1 "flashinfer-jit-cache==0.6.15.post1+cu128" \
-    --extra-index-url https://flashinfer.ai/whl/cu128/
-```
+This fork follows upstream deliberately rather than blindly. Upstream changes are reviewed for:
 
-**Usage** with the batch inference CLI:
+- model and tokenizer compatibility;
+- inference/output behavior;
+- training compatibility;
+- dependency and CUDA impact;
+- interaction with Project Studio and verification;
+- regression coverage before integration.
 
-```bash
-omnivoice-infer-batch \
-    --model k2-fsa/OmniVoice \
-    --test_list test.jsonl \
-    --res_dir results/ \
-    --batch_size 8 \
-    --enable_flashinfer true
-```
+See the roadmap for current upstream-drift status and planned guard automation.
 
-or with the Python API:
+## Training & evaluation
 
-```python
-from omnivoice.models.omnivoice_flashinfer import apply_flashinfer
-
-model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", device_map="cuda", dtype=torch.float16)
-apply_flashinfer(model)                          # throughput / batched inference
-apply_flashinfer(model, enable_cuda_graph=True)  # recommended for batch=1 (low latency)
-```
-
-CUDA graphs are recommended for single-stream (batch=1) usage, where kernel-launch overhead dominates; at batch >= 4 the plain FlashInfer path is already the fastest configuration.
-
-**Benchmark** (seed-tts zh testset, 2020 samples / 3.3h audio, voice cloning, single H100, fp16, `num_step=32`; Average RTF as reported by `omnivoice-infer-batch`, outputs ASR-verified lossless):
-
-| batch size | baseline | FlashInfer | speedup |
-|---|---|---|---|
-| 1 | 0.0899 | 0.0430 | 2.1x |
-| 1 + CUDA graph | — | 0.0367 | 2.4x |
-| 2 | 0.0480 | 0.0245 | 2.0x |
-| 4 | 0.0331 | 0.0152 | 2.2x |
-| 8 | 0.0298 | **0.0115** | **2.6x** |
-
----
-
-## Training & Evaluation
-
-See [examples/](examples/) for the complete pipeline — from data preparation to training, evaluation, and finetuning.
-
----
-
-## Discussion & Communication
-
-You can directly discuss on [GitHub Issues](https://github.com/k2-fsa/OmniVoice/issues).
-
-You can also scan the QR code to join our wechat group or follow our wechat official account.
-
-| Wechat Group | Wechat Official Account |
-| ------------ | ----------------------- |
-|![wechat](https://k2-fsa.org/zh-CN/assets/pic/wechat_group.jpg) |![wechat](https://k2-fsa.org/zh-CN/assets/pic/wechat_account.jpg) |
-
----
-
-## Community Projects
-
-OmniVoice is supported by a growing ecosystem of community projects.
-Explore them in [Community Projects](docs/community-projects.md).
-
-Silence-postprocessing fixes and production validation by [Thomas Vanini](https://linktr.ee/ThomasVanini) for the GTA V Enhanced PT-BR Dubbing Project, developed with [OpenAI Codex](https://developers.openai.com/).
-
----
+The upstream training/evaluation pipeline remains available. See [examples/](examples/) for data preparation, training, evaluation, and fine-tuning workflows.
 
 ## Citation
 
@@ -418,8 +430,6 @@ Silence-postprocessing fixes and production validation by [Thomas Vanini](https:
 }
 ```
 
----
-
 ## Disclaimer
 
-Users are strictly prohibited from using this model for unauthorized voice cloning, voice impersonation, fraud, scams, or any other illegal or unethical activities. All users shall ensure full compliance with applicable local laws, regulations, and ethical standards. The developers assume no liability for any misuse of this model and advocate for responsible AI development and use, encouraging the community to uphold safety and ethical principles in AI research and applications.
+Do not use this model for unauthorized voice cloning, impersonation, fraud, scams, or illegal activity. Ensure that you have the rights and consent required for any voice data you use and comply with applicable laws and platform rules.

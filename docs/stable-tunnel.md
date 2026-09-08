@@ -2,10 +2,10 @@
 
 OmniVoice Studio can keep one permanent public hostname even though Kaggle or Colab creates a new runtime every session.
 
-The initial publishing backend uses a remotely-managed Cloudflare Tunnel:
+The current publishing backend uses a remotely-managed Cloudflare Tunnel:
 
 ```text
-ChatGPT / Claude Code / Antigravity / Browser
+ChatGPT / Claude Code / MCP client / Browser
                     |
         https://omnivoice.example.com
                     |
@@ -17,12 +17,12 @@ ChatGPT / Claude Code / Antigravity / Browser
          /ui   /api/v1   /mcp
 ```
 
-Cloudflare stores the tunnel and public hostname mapping. The ephemeral runtime only reconnects as a new connector replica using the same tunnel token.
+Cloudflare keeps the tunnel and public-hostname mapping. An ephemeral runtime reconnects as another connector for the same named tunnel.
 
 ## One-time Cloudflare setup
 
 1. Add/manage your domain in Cloudflare.
-2. In Cloudflare Dashboard, create a remotely-managed Tunnel, for example `omnivoice-studio`.
+2. Create a remotely-managed Tunnel, for example `omnivoice-studio`.
 3. Add a Published Application route:
 
 ```text
@@ -31,33 +31,48 @@ Service:         http://localhost:8000
 ```
 
 4. Copy the tunnel token from **Add a replica**.
-5. Store that token as a private Kaggle/Colab secret. Never place it in the notebook, git repository, project files, or MCP config.
+5. Store that token in Kaggle/Colab secrets or another secret manager.
 
-Once the route exists, DNS and hostname stay stable even when the Kaggle connector goes offline and later reconnects.
+Do not put the token in git, notebooks committed to git, project state, MCP configuration, or shell history.
 
-## Runtime secrets
+## Runtime environment
 
-Studio reads the tunnel token from:
-
-```text
-CLOUDFLARE_TUNNEL_TOKEN
+```bash
+export CLOUDFLARE_TUNNEL_TOKEN="..."
+export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
 ```
 
-The public URL can be supplied by CLI or environment:
+Studio writes the token to a temporary permission-`0600` file and supplies it to `cloudflared` using `--token-file`. The raw token is not placed in the child-process command line.
 
-```text
-OMNIVOICE_PUBLIC_URL=https://omnivoice.example.com
+## Authentication for public deployment
+
+Stable tunnel support and API authentication are both implemented.
+
+Machine/API:
+
+```bash
+export OMNIVOICE_API_TOKEN="strong-secret"
+export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
 ```
 
-The token is written to a temporary permission-`0600` file and supplied to `cloudflared` with `--token-file`. The raw token is not placed in the child-process command line.
+Gradio UI:
 
-## Install cloudflared in an ephemeral notebook
+```bash
+export OMNIVOICE_UI_USERNAME="studio"
+export OMNIVOICE_UI_PASSWORD="strong-password"
+```
 
-Install the current Cloudflare binary in a setup cell or image before launching Studio. For example on Linux amd64, place the `cloudflared` executable somewhere on `PATH` and make it executable.
+For an external access layer that already protects `/ui`, Studio supports an explicit trusted external UI-auth boundary. Do not use that option unless the external layer is actually trusted and enforced.
 
-Studio deliberately does not download network executables by itself. Keeping installation separate makes the trust boundary visible and easier to audit.
+Public deployment fails closed when required auth is missing, except when an explicit insecure test override is intentionally configured.
 
-## Start Studio + named tunnel
+## Install cloudflared
+
+Install `cloudflared` explicitly in the runtime or image and keep it on `PATH`, or pass its path with `--cloudflared`.
+
+Studio deliberately does not download a network executable automatically.
+
+## Start Studio + tunnel
 
 ```bash
 omnivoice-studio serve \
@@ -68,50 +83,84 @@ omnivoice-studio serve \
   --public-url https://omnivoice.example.com
 ```
 
-The same process exposes:
+Public surfaces:
 
 ```text
 https://omnivoice.example.com/ui
 https://omnivoice.example.com/api/v1
 https://omnivoice.example.com/mcp
 https://omnivoice.example.com/health
+https://omnivoice.example.com/docs
 ```
 
-`--public-url` also configures the MCP DNS-rebinding host/origin allowlist before the MCP ASGI app is built.
+## MCP host/origin security
+
+`--public-url` configures MCP host/origin allowlists for the stable hostname unless explicit values already exist.
+
+Explicit configuration:
+
+```bash
+export OMNIVOICE_MCP_ALLOWED_HOSTS="omnivoice.example.com,omnivoice.example.com:*"
+export OMNIVOICE_MCP_ALLOWED_ORIGINS="https://omnivoice.example.com"
+```
+
+Only delegate DNS-rebinding protection with:
+
+```bash
+export OMNIVOICE_MCP_TRUST_PROXY=1
+```
+
+when a trusted reverse proxy is deliberately enforcing the boundary.
 
 ## Kaggle secret example
-
-Use Kaggle Secrets to retrieve the token inside the notebook, then put it in the process environment only for the runtime:
 
 ```python
 import os
 from kaggle_secrets import UserSecretsClient
 
 secrets = UserSecretsClient()
+
 os.environ["CLOUDFLARE_TUNNEL_TOKEN"] = secrets.get_secret(
     "CLOUDFLARE_TUNNEL_TOKEN"
 )
+os.environ["OMNIVOICE_API_TOKEN"] = secrets.get_secret(
+    "OMNIVOICE_API_TOKEN"
+)
+os.environ["OMNIVOICE_UI_PASSWORD"] = secrets.get_secret(
+    "OMNIVOICE_UI_PASSWORD"
+)
+os.environ["OMNIVOICE_UI_USERNAME"] = "studio"
 os.environ["OMNIVOICE_PUBLIC_URL"] = "https://omnivoice.example.com"
 ```
 
-Do not print either environment variable.
+Do not print secret values.
 
 ## Client configuration
 
-Once the fixed hostname is running, AI clients can keep one MCP URL permanently:
+MCP clients can keep:
 
 ```text
 https://omnivoice.example.com/mcp
 ```
 
-Kaggle session A can disappear and session B can reconnect the same named tunnel. ChatGPT, Claude Code, and Antigravity do not need a new OmniVoice MCP URL.
+When one Kaggle/Colab session disappears and another reconnects the same named tunnel, the client URL does not change.
 
-When the Kaggle runtime is offline, the fixed hostname remains the configured address but the origin is unavailable. A later Control Plane can make this state more graceful without changing the client URL.
+If no worker is online, the hostname remains stable but the origin is unavailable. A future optional control plane/worker registry is planned to make worker availability and reconnect behavior more explicit.
 
-## Security boundary
+## Security checklist
 
-A tunnel token lets a connector run that tunnel, so treat it as a secret. Rotate it if exposed.
+Before publishing:
 
-MCP mutation authentication is a separate milestone. Until bearer-token/scoped API authentication is implemented, do not publish mutation-capable `/mcp` to an unrestricted audience merely because the tunnel hostname is stable.
+- [ ] API bearer token configured.
+- [ ] minimum required scopes configured.
+- [ ] Gradio UI protected.
+- [ ] tunnel token stored as a secret.
+- [ ] public URL is correct.
+- [ ] MCP allowed host/origin correct.
+- [ ] no secret printed in notebook/log.
+- [ ] `/health` works.
+- [ ] authorized API request works.
+- [ ] unauthorized request is rejected.
+- [ ] MCP client can connect with the expected auth boundary.
 
-For a private deployment, Cloudflare Access can also be placed in front of the hostname, but compatibility with individual MCP clients must be tested before making Access interactive login part of the required path.
+See [ai-native-mcp.md](ai-native-mcp.md) and [project-studio-roadmap.md](project-studio-roadmap.md).

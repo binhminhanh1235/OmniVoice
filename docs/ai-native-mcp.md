@@ -1,16 +1,16 @@
 # OmniVoice Studio MCP
 
-OmniVoice Studio exposes Model Context Protocol (MCP) from the same unified server as the Gradio UI and REST API.
+OmniVoice Studio exposes Model Context Protocol from the same unified process as Gradio and REST.
 
 ```text
 OmniVoice Studio :8000
-├── /ui       Gradio Web UI
+├── /ui       Gradio Studio
 ├── /api/v1   REST / OpenAPI
 ├── /mcp      Streamable HTTP MCP
 └── /health   runtime health
 ```
 
-The MCP adapter does not contain a second TTS implementation. Read operations use `StudioService`; mutations submit work to the same persistent `StudioJobManager` used by REST.
+The MCP adapter does not own a second TTS implementation. Read operations use `StudioService`; generation mutations submit durable jobs through `StudioJobManager`.
 
 ## Transport
 
@@ -20,7 +20,7 @@ MCP uses Streamable HTTP and is mounted at:
 /mcp
 ```
 
-The unified launcher remains:
+Launch:
 
 ```bash
 omnivoice-studio serve \
@@ -29,17 +29,9 @@ omnivoice-studio serve \
   --port 8000
 ```
 
-A future fixed hostname can therefore expose all three surfaces without changing the Studio process:
-
-```text
-https://omnivoice.example.com/ui
-https://omnivoice.example.com/api/v1
-https://omnivoice.example.com/mcp
-```
-
 ## MCP tools v1
 
-The initial tool set is intentionally task-oriented and small:
+Current task-oriented tools:
 
 ```text
 studio_status
@@ -51,7 +43,9 @@ get_job
 cancel_job
 ```
 
-`generate_project` is asynchronous. It submits a durable single-GPU job and immediately returns:
+### generate_project
+
+`generate_project` is asynchronous. It submits a durable job and returns immediately:
 
 ```json
 {
@@ -62,13 +56,15 @@ cancel_job
 }
 ```
 
-AI clients should use a stable `idempotency_key` when retrying a command after a network timeout. Repeating the same key returns the existing job instead of duplicating GPU work.
+Use a stable `idempotency_key` when retrying after a network timeout. Reusing the same key returns the existing job instead of duplicating GPU work.
 
-Cancellation is cooperative. It never kills model inference in the middle of a section; the cancellation becomes effective at the next safe checkpoint.
+### Cancellation
+
+Cancellation is cooperative. It takes effect at a safe checkpoint rather than killing model inference mid-section.
 
 ## MCP resources
 
-Read-only resources are also exposed:
+Read-only resources:
 
 ```text
 omnivoice://projects/{project_id}
@@ -78,46 +74,103 @@ omnivoice://queue
 ## Recommended agent workflow
 
 ```text
-list_projects(statuses=[PENDING, GENERATING])
-        ↓
+list_projects(...)
+        |
 inspect_project(project_id)
-        ↓
+        |
 generate_project(..., idempotency_key=...)
-        ↓
+        |
+      job_id
+        |
 get_job(job_id)
-        ↓
-SSE /api/v1/jobs/{job_id}/stream for live progress
+        |
+SSE /api/v1/jobs/{job_id}/stream
 ```
 
-The MCP server returns job IDs rather than holding one tool call open for the duration of a long TTS render.
+## Authentication
+
+Bearer auth and scopes are implemented.
+
+Example:
+
+```bash
+export OMNIVOICE_API_TOKEN="strong-secret"
+export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
+```
+
+Relevant scopes:
+
+```text
+omnivoice:read
+omnivoice:generate
+omnivoice:queue
+omnivoice:mcp
+omnivoice:admin
+```
+
+A valid token with insufficient scope receives a different authorization failure from an invalid/missing token.
 
 ## Transport security
 
-The MCP SDK enables DNS-rebinding protection for local development. Public fixed-host deployments should provide explicit host/origin allowlists.
+The MCP transport supports DNS-rebinding protection.
 
-Example:
+For a fixed public hostname:
 
 ```bash
 export OMNIVOICE_MCP_ALLOWED_HOSTS="omnivoice.example.com,omnivoice.example.com:*"
 export OMNIVOICE_MCP_ALLOWED_ORIGINS="https://omnivoice.example.com"
 ```
 
-When a trusted reverse proxy or named tunnel is intentionally the security boundary, protection can be explicitly delegated:
+When `--public-url` is used, Studio configures the public-host allowlist unless explicit values already exist.
+
+Only use:
 
 ```bash
 export OMNIVOICE_MCP_TRUST_PROXY=1
 ```
 
-Do not enable that option for an untrusted direct public listener.
+when a trusted reverse proxy/tunnel is intentionally the security boundary.
 
-Authentication/scopes are a separate upcoming layer. Until API authentication is implemented, do not expose mutation-capable MCP endpoints on an unrestricted public hostname.
+## Stable public MCP URL
 
-## ChatGPT, Claude, and Antigravity
-
-The intended deployment model is one stable remote endpoint configured once in clients:
+Named Cloudflare Tunnel support is implemented, so clients can keep a stable URL:
 
 ```text
 https://omnivoice.example.com/mcp
 ```
 
-Kaggle or Colab session URLs remain implementation details behind the publishing layer. The next milestone is the stable hostname / named tunnel path, followed by API authentication and the Universal OmniVoice Skill.
+Example environment:
+
+```bash
+export OMNIVOICE_API_TOKEN="strong-secret"
+export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
+export CLOUDFLARE_TUNNEL_TOKEN="..."
+export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
+```
+
+Launch:
+
+```bash
+omnivoice-studio serve \
+  --workspace ./OmniVoiceStudio \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tunnel \
+  --public-url https://omnivoice.example.com
+```
+
+## What is still planned?
+
+The MCP foundation is production-merged, but the command surface is intentionally small.
+
+Planned after REST command contracts stabilize:
+
+- preview tool;
+- queue mutation tools;
+- regenerate chunk tool;
+- merge/export tool;
+- Universal OmniVoice Skill;
+- ChatGPT / Claude Code / generic MCP examples;
+- optional control plane + worker registry.
+
+See [project-studio-roadmap.md](project-studio-roadmap.md) for canonical status.
