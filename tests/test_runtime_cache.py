@@ -127,7 +127,7 @@ def test_persist_then_restore_compatible_cache(tmp_path):
     assert (second.local_namespace / "whisper" / "asr.bin").read_bytes() == b"asr-cache"
 
 
-def test_incompatible_fingerprint_does_not_restore_stale_cache(tmp_path):
+def test_package_revision_reuses_compatible_resource_cache(tmp_path):
     persistent = tmp_path / "persistent"
     old_fp = fingerprint("old")
     old_layout = RuntimeCacheLayout(
@@ -141,6 +141,41 @@ def test_incompatible_fingerprint_does_not_restore_stale_cache(tmp_path):
     persist_runtime_cache(old)
 
     new_fp = fingerprint("new")
+    new_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "session-new",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    new = prepare_runtime_cache(new_layout, new_fp)
+
+    assert new.fast_path is True
+    assert (new.local_namespace / "pip" / "old.bin").read_bytes() == b"old"
+    assert new.local_namespace.name == old.local_namespace.name
+    assert new_fp.package_key != old_fp.package_key
+
+
+def test_incompatible_python_fingerprint_does_not_restore_stale_cache(tmp_path):
+    persistent = tmp_path / "persistent"
+    old_fp = fingerprint("same")
+    old_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "session-old",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    old = prepare_runtime_cache(old_layout, old_fp)
+    (old.local_namespace / "pip" / "old.bin").write_bytes(b"old")
+    persist_runtime_cache(old)
+
+    new_fp = RuntimeCacheFingerprint(
+        schema_version=1,
+        cache_version="test-v1",
+        python_version="3.12",
+        system="linux",
+        machine="x86_64",
+        package_ref="same",
+    )
     new_layout = RuntimeCacheLayout(
         environment="local",
         local_root=tmp_path / "session-new",
@@ -184,5 +219,6 @@ def test_cache_status_reports_persistent_readiness(tmp_path):
     status = cache_status(layout, fp)
 
     assert status["cache_key"] == fp.key
+    assert status["package_key"] == fp.package_key
     assert status["local_ready"] is True
     assert status["source_ready"] is True
