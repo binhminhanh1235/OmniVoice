@@ -9,6 +9,7 @@ from omnivoice.runtime_cache import (
     detect_runtime_cache,
     persist_runtime_cache,
     prepare_runtime_cache,
+    write_startup_cache_evidence,
     write_workspace_cache_metadata,
 )
 
@@ -18,14 +19,15 @@ def fake_exists(*existing: str):
     return lambda path: str(Path(path)) in resolved
 
 
-def fingerprint(ref: str = "abc123"):
+def fingerprint(ref: str = "abc123", *, resource_signature: str = "models-v1"):
     return RuntimeCacheFingerprint(
-        schema_version=1,
-        cache_version="test-v1",
+        schema_version=2,
+        cache_version="test-v2",
         python_version="3.11",
         system="linux",
         machine="x86_64",
         package_ref=ref,
+        resource_signature=resource_signature,
     )
 
 
@@ -89,9 +91,11 @@ def test_prepare_uses_cold_path_when_metadata_is_missing(tmp_path):
     assert result.fast_path is False
     assert result.restored_from is None
     assert (result.local_namespace / "pip").is_dir()
-    assert "fingerprint" in json.loads(
+    metadata = json.loads(
         (result.local_namespace / "metadata.json").read_text(encoding="utf-8")
     )
+    assert metadata["state"] == "cold"
+    assert metadata["inventory"]["pip"] == {"files": 0, "bytes": 0}
 
 
 def test_persist_then_restore_compatible_cache(tmp_path):
@@ -111,6 +115,9 @@ def test_persist_then_restore_compatible_cache(tmp_path):
     target = persist_runtime_cache(first)
     assert target is not None
     assert (target / "pip" / "download.bin").read_bytes() == b"pip-cache"
+    metadata = json.loads((target / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["state"] == "ready"
+    assert metadata["inventory"]["huggingface"]["files"] == 1
 
     second_layout = RuntimeCacheLayout(
         environment="colab",
@@ -170,12 +177,13 @@ def test_incompatible_python_fingerprint_does_not_restore_stale_cache(tmp_path):
     persist_runtime_cache(old)
 
     new_fp = RuntimeCacheFingerprint(
-        schema_version=1,
-        cache_version="test-v1",
+        schema_version=2,
+        cache_version="test-v2",
         python_version="3.12",
         system="linux",
         machine="x86_64",
         package_ref="same",
+        resource_signature="models-v1",
     )
     new_layout = RuntimeCacheLayout(
         environment="local",
@@ -188,6 +196,117 @@ def test_incompatible_python_fingerprint_does_not_restore_stale_cache(tmp_path):
     assert new.fast_path is False
     assert not (new.local_namespace / "pip" / "old.bin").exists()
     assert new.local_namespace != old.local_namespace
+
+
+def test_resource_signature_change_invalidates_model_cache(tmp_path):
+    persistent = tmp_path / "persistent"
+    old_fp = fingerprint(resource_signature="model-a|asr-a")
+    old_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "old",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    old = prepare_runtime_cache(old_layout, old_fp)
+    (old.local_namespace / "huggingface" / "old.bin").write_bytes(b"old")
+    persist_runtime_cache(old)
+
+    new_fp = fingerprint(resource_signature="model-b|asr-a")
+    new_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "new",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    new = prepare_runtime_cache(new_layout, new_fp)
+
+    assert new.fast_path is False
+    assert new.local_namespace != old.local_namespace
+    assert not (new.local_namespace / "huggingface" / "old.bin").exists()
+
+
+def test_writing_state_is_never_reused(tmp_path):
+    fp = fingerprint()
+    persistent = tmp_path / "persistent"
+    first_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "first",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    first = prepare_runtime_cache(first_layout, fp)
+    (first.local_namespace / "pip" / "payload.bin").write_bytes(b"payload")
+    target = persist_runtime_cache(first)
+    metadata_path = target / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["state"] = "writing"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    next_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "next",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    prepared = prepare_runtime_cache(next_layout, fp)
+
+    assert prepared.fast_path is False
+    assert "not reusable" in prepared.reason
+    assert not (prepared.local_namespace / "pip" / "payload.bin").exists()
+
+
+def test_missing_or_truncated_persistent_file_forces_cold_fallback(tmp_path):
+    fp = fingerprint()
+    persistent = tmp_path / "persistent"
+    first_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "first",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    first = prepare_runtime_cache(first_layout, fp)
+    payload = first.local_namespace / "huggingface" / "model.bin"
+    payload.write_bytes(b"1234567890")
+    target = persist_runtime_cache(first)
+    (target / "huggingface" / "model.bin").write_bytes(b"123")
+
+    next_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "next",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    prepared = prepare_runtime_cache(next_layout, fp)
+
+    assert prepared.fast_path is False
+    assert "inventory mismatch" in prepared.reason
+    assert not (prepared.local_namespace / "huggingface" / "model.bin").exists()
+
+
+def test_missing_cache_component_forces_cold_fallback(tmp_path):
+    fp = fingerprint()
+    persistent = tmp_path / "persistent"
+    first_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "first",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    first = prepare_runtime_cache(first_layout, fp)
+    target = persist_runtime_cache(first)
+    (target / "torch").rmdir()
+
+    next_layout = RuntimeCacheLayout(
+        environment="local",
+        local_root=tmp_path / "next",
+        source_root=persistent,
+        persist_root=persistent,
+    )
+    prepared = prepare_runtime_cache(next_layout, fp)
+
+    assert prepared.fast_path is False
+    assert "unreadable" in prepared.reason
+    assert (prepared.local_namespace / "torch").is_dir()
 
 
 def test_apply_environment_points_all_hot_caches_to_local_namespace(tmp_path):
@@ -237,4 +356,26 @@ def test_workspace_metadata_records_reusable_cache_identity(tmp_path):
     assert payload["cache_key"] == fp.key
     assert payload["package_key"] == fp.package_key
     assert payload["package_ref"] == "sha-123"
+    assert payload["resource_signature"] == "models-v1"
     assert payload["local_namespace"] == str(prepared.local_namespace)
+    assert payload["reason"] == prepared.reason
+
+
+def test_startup_evidence_records_cold_warm_dimensions(tmp_path):
+    fp = fingerprint("sha-456")
+    layout = RuntimeCacheLayout(environment="colab", local_root=tmp_path / "cache")
+    prepared = prepare_runtime_cache(layout, fp)
+
+    path = write_startup_cache_evidence(
+        tmp_path / "studio",
+        prepared,
+        wheel_fast_path=True,
+        bootstrap_seconds=12.3456,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["environment"] == "colab"
+    assert payload["package_ref"] == "sha-456"
+    assert payload["resource_fast_path"] is False
+    assert payload["wheel_fast_path"] is True
+    assert payload["bootstrap_seconds"] == 12.346
