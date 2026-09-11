@@ -112,9 +112,12 @@ local cache:       /content/.cache/omnivoice
 persistent cache:  MyDrive/OmniVoiceStudio/.startup-cache
 active workspace:  /content/OmniVoiceStudio
 persistent data:   MyDrive/OmniVoiceStudio
+startup evidence:  MyDrive/OmniVoiceStudio/.startup-evidence
 ```
 
 Project audio/checkpoint writes do not use Drive as the render hot path. The persistent workspace is restored once to local SSD and mirrored back every 45 seconds plus a final sync when Studio exits.
+
+Runtime-only `.runtime-cache.json` and `startup-cache-evidence.json` plus `.startup-cache/` and `.startup-evidence/` are excluded from the normal project mirror. Each startup sample is copied separately into `.startup-evidence/`, so restoring project files cannot overwrite the current cold/warm measurement.
 
 ## Kaggle
 
@@ -147,32 +150,42 @@ OMNIVOICE_LOCAL_CACHE_ROOT
 The focused CI gate runs:
 
 ```bash
-python -m py_compile omnivoice/runtime_cache.py notebooks/hosted_runtime_bootstrap.py
+python -m py_compile \
+  omnivoice/runtime_cache.py \
+  notebooks/hosted_runtime_bootstrap.py \
+  scripts/hosted_cache_acceptance.py
 python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
 python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
-pytest -q tests/test_runtime_cache.py tests/test_hosted_runtime_bootstrap.py
+pytest -q \
+  tests/test_runtime_cache.py \
+  tests/test_hosted_runtime_bootstrap.py \
+  tests/test_hosted_cache_acceptance.py
 ```
 
-Those tests cover cold -> persist -> warm restore, runtime/resource invalidation, interrupted `writing` state, missing/truncated cache data, exact-SHA validation, exact-wheel hash corruption and startup evidence.
+Those tests cover cold -> persist -> warm restore, runtime/resource invalidation, interrupted `writing` state, missing/truncated cache data, exact-SHA validation, exact-wheel hash corruption and the evidence acceptance checker.
 
 ## Real Colab/Kaggle cold/warm acceptance
 
 Real startup time depends on hosted storage/network/runtime images, so it must be measured on the target platform rather than simulated in CI.
 
-Run the startup cell once with no compatible v2 cache. Save the generated file:
+Run the startup cell once with no compatible v2 cache and keep the generated:
 
 ```text
 <WORKSPACE>/startup-cache-evidence.json
 ```
 
-For Colab, restart the runtime while keeping the Drive cache. For Kaggle, save `/kaggle/working/OmniVoiceStartupCache` as Dataset `omnivoice-startup-cache`, attach it to a fresh session, and rerun the startup cell.
+For Colab, a copy is automatically archived under:
 
-Then inspect:
+```text
+MyDrive/OmniVoiceStudio/.startup-evidence/
+```
 
-```python
-import json
-from pathlib import Path
-print(json.dumps(json.loads(Path(WORKSPACE, "startup-cache-evidence.json").read_text()), indent=2))
+For Kaggle, download/copy the evidence file before ending the cold session. Save `/kaggle/working/OmniVoiceStartupCache` as Dataset `omnivoice-startup-cache`, attach it to a fresh session, then run startup again and save the warm evidence file.
+
+Compare the two real samples with the repository checker:
+
+```bash
+python scripts/hosted_cache_acceptance.py cold.json warm.json
 ```
 
 Warm acceptance requires:
@@ -185,7 +198,7 @@ bootstrap_seconds(warm) < bootstrap_seconds(cold)
 Studio still launches and renders from the local WORKSPACE path
 ```
 
-Keep both evidence JSON files and record their `bootstrap_seconds` in the roadmap/table. Do not invent a hosted-runtime speedup from local CI timing.
+The checker fails non-zero when the exact package SHA differs, a warm fast-path flag is false, timing is missing, or the warm bootstrap is not faster. Do not invent a hosted-runtime speedup from local CI timing.
 
 ## Workspace metadata
 
