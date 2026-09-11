@@ -185,8 +185,11 @@ def _compatibility(
     model_revision: str,
     asr_revision: str,
 ) -> dict[str, object]:
-    resource_signature = f"{MODEL_ID}@{model_revision}|{ASR_MODEL}@{asr_revision}"
     libc_name, libc_version = platform.libc_ver()
+    libc = f"{libc_name}-{libc_version}" if libc_name else "unknown"
+    resource_signature = (
+        f"{MODEL_ID}@{model_revision}|{ASR_MODEL}@{asr_revision}|libc={libc}"
+    )
     return {
         "schema_version": CACHE_SCHEMA_VERSION,
         "cache_version": CACHE_VERSION,
@@ -194,7 +197,6 @@ def _compatibility(
         "system": platform.system().lower(),
         "machine": platform.machine().lower(),
         "resource_signature": resource_signature,
-        "libc": f"{libc_name}-{libc_version}" if libc_name else "unknown",
     }
 
 
@@ -208,10 +210,7 @@ def bootstrap_hosted_runtime(
     *,
     environ: Optional[Mapping[str, str]] = None,
 ) -> dict[str, object]:
-    """Install an exact OmniVoice revision and prepare persistent startup caches.
-
-    Returns globals consumed by the notebook's later launch cells.
-    """
+    """Install an exact OmniVoice revision and prepare persistent startup caches."""
 
     started = time.perf_counter()
     package_ref = validate_exact_revision(package_ref, label="OmniVoice package revision")
@@ -331,20 +330,6 @@ def bootstrap_hosted_runtime(
         package_ref=package_ref,
         resource_signature=resource_signature,
     )
-    # The library also fingerprints libc. Keep the bootstrap payload aligned by
-    # folding libc into the explicit resource signature before cache preparation.
-    fingerprint = RuntimeCacheFingerprint(
-        schema_version=fingerprint.schema_version,
-        cache_version=fingerprint.cache_version,
-        python_version=fingerprint.python_version,
-        system=fingerprint.system,
-        machine=fingerprint.machine,
-        package_ref=fingerprint.package_ref,
-        resource_signature=f"{resource_signature}|libc={compatibility['libc']}",
-    )
-
-    # Recompute the library namespace from its canonical fingerprint. The
-    # bootstrap cache is temporary, so a different bootstrap key is harmless.
     preparation = prepare_runtime_cache(detect_runtime_cache(), fingerprint)
     apply_cache_environment(preparation)
     _copy_tree(bootstrap_cache / "pip", preparation.local_namespace / "pip")
