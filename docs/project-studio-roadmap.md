@@ -1,6 +1,6 @@
 # OmniVoice Project Studio roadmap
 
-Last status review: 2026-09-08.
+Last status review: 2026-09-11.
 
 This roadmap is the canonical status page for the production-oriented OmniVoice Studio fork. It distinguishes code already merged to `master`, work under review, experimental work, and future plans.
 
@@ -13,14 +13,14 @@ This roadmap is the canonical status page for the production-oriented OmniVoice 
 
 ## Current production baseline
 
-At this snapshot:
+Verified P2 code baseline before this roadmap-only status commit:
 
 ```text
-master:
-dfed08b5d2b26298b2417a92f904a862e2f83590
+master / squash merge:
+d75d772b85332b40b66eb22f35d5c96ff56b2081
 
 tree:
-b956f59dd25470c49857c21879f9a63f70d86a22
+bb6d2e0e185dbf50cf7555a8032833fc3484fe62
 ```
 
 This baseline includes:
@@ -30,9 +30,10 @@ This baseline includes:
 - optional section-title narration;
 - unified project-first workspace;
 - benchmark framework;
+- persistent Colab/Kaggle startup caching;
 - existing Project Studio, recovery, AI-native server, MCP, tunnel and auth foundations.
 
-Persistent hosted-runtime caching is tracked separately as **IN REVIEW** until merged.
+The roadmap status commit that marks P2 complete is documentation-only. If path filters do not trigger code workflows for that commit, the verified code baseline remains the squash-merge SHA above.
 
 ## P0 - Production Project Studio foundation
 
@@ -155,22 +156,31 @@ Required acceptance:
 
 ## P2 - Persistent Colab/Kaggle startup caching
 
-Status: **IN REVIEW**
+Status: **MERGED / VERIFIED**
 
-Tracked implementation:
+Final implementation and merge evidence:
 
 ```text
 PR #49
-feat/persistent-hosted-runtime-cache
-head 27cf233ebb93edd6ff3ad5c57045ec5637a32ffb
+branch: feat/persistent-hosted-runtime-cache
+final PR head: a74b1ba60ba0558bba4d444ce012ad04a676fb75
+final PR head tree: cbbb7397b2a99b7fc922f1472096863427757d4a
+
+squash merge SHA: d75d772b85332b40b66eb22f35d5c96ff56b2081
+squash merge tree: bb6d2e0e185dbf50cf7555a8032833fc3484fe62
 ```
 
-At the latest review checkpoint:
+Exact-head pre-merge CI at `a74b1ba60ba0558bba4d444ce012ad04a676fb75`:
 
-- Notebook JSON validation: PASS.
-- Robust regression CI #300: PASS.
+- Hosted runtime cache safety #14 / run `34607378458`: PASS.
+- Notebook JSON validation #27 / run `34607378477`: PASS.
+- Robust long-form/project #317 / run `34607378410`: PASS.
 
-The feature is still classified as **IN REVIEW** until it is merged to `master`.
+Post-merge exact-SHA CI at `d75d772b85332b40b66eb22f35d5c96ff56b2081`:
+
+- Hosted runtime cache safety #15 / run `34607761811`: PASS.
+- Notebook JSON validation #28 / run `34607761677`: PASS.
+- Robust long-form/project #318 / run `34607761685`: PASS.
 
 Acceptance scope:
 
@@ -183,12 +193,27 @@ Acceptance scope:
 - [x] cache version/fingerprint.
 - [x] invalidation path.
 - [x] exact source-revision wheel path.
+- [x] exact source wheel integrity validation, including filename, byte size, SHA-256 and ZIP integrity before reuse.
+- [x] exact model/ASR revision fingerprinting and invalidation.
+- [x] interrupted/partial cache state is rejected rather than promoted.
+- [x] missing/truncated/corrupt cache trees fall back safely to cold startup.
 - [x] fast path.
 - [x] cold-start fallback.
 - [x] local SSD execution remains the generation hot path.
-- [ ] merge to master after final review.
-- [ ] verify post-merge exact-head CI.
-- [ ] add a user-facing measured cold-start vs warm-start table from real Colab/Kaggle runs.
+- [x] merge to master after final review.
+- [x] verify post-merge exact-SHA CI.
+
+Real Colab/Kaggle timing remains external-runtime evidence. No local CI timing is treated as a hosted-runtime speedup benchmark, and no cold/warm number is fabricated in this roadmap.
+
+For real hosted evidence, preserve one cold and one warm `startup-cache-evidence.json` sample and run:
+
+```bash
+python scripts/hosted_cache_acceptance.py cold.json warm.json
+```
+
+The checker must confirm the exact package SHA, warm fast-path flags, valid timings and a faster warm bootstrap before a measured hosted-runtime result is recorded.
+
+- [ ] add a user-facing measured cold-start vs warm-start table from real Colab/Kaggle runs when that external-runtime evidence exists.
 
 ### Follow-up cache work
 
@@ -417,16 +442,15 @@ Planned guard:
 
 ## Next production order
 
-1. Finish review and merge persistent hosted-runtime caching.
-2. Re-check post-merge master CI and real warm/cold hosted-runtime measurements.
-3. Extract and validate lazy CPU ASR startup as a separate safe optimization.
-4. Validate local-first Colab workspace with measured I/O/startup improvement.
-5. Update all AI-native docs to the actual merged Job Manager/SSE/MCP/tunnel/auth state.
-6. Add upstream drift guard.
-7. Add missing write REST/MCP commands.
-8. Add Universal OmniVoice Skill and agent examples.
-9. Continue verification/cache intelligence.
-10. Evaluate target-only inference only after real quality acceptance.
+1. Audit and validate lazy CPU ASR startup as a separate safe optimization.
+2. Collect real Colab/Kaggle cold/warm evidence when a hosted runtime is available; do not substitute local timing.
+3. Validate local-first Colab workspace with measured I/O/startup improvement.
+4. Update all AI-native docs to the actual merged Job Manager/SSE/MCP/tunnel/auth state.
+5. Add upstream drift guard.
+6. Add missing write REST/MCP commands.
+7. Add Universal OmniVoice Skill and agent examples.
+8. Continue verification/cache intelligence.
+9. Evaluate target-only inference only after real quality acceptance.
 
 ## Architectural rules
 
