@@ -2,38 +2,38 @@
 
 Last status review: 2026-09-11.
 
-This roadmap is the canonical status page for the production-oriented OmniVoice Studio fork. It distinguishes code already merged to `master`, work under review, experimental work, and future plans.
+This roadmap is the canonical status page for the production-oriented OmniVoice Studio fork. It distinguishes code already merged to `master`, experimental work, and future plans.
 
 ## Status legend
 
 - **MERGED / VERIFIED**: on `master` and covered by the relevant regression boundary.
 - **IN REVIEW**: implemented on a feature branch or PR but not yet production master.
-- **EXPERIMENTAL**: useful research/prototype code that must not be enabled by assumption.
+- **EXPERIMENTAL**: research/prototype code that must not be enabled by assumption.
 - **PLANNED**: accepted direction, not implemented yet.
 
 ## Current production baseline
 
-Verified P2 code baseline before this roadmap-only status commit:
+Current verified `master` after Lazy CPU ASR Startup:
 
 ```text
 master / squash merge:
-d75d772b85332b40b66eb22f35d5c96ff56b2081
+b8cdb00fd07140e0f785991e5bfa5fac9486638b
 
 tree:
-bb6d2e0e185dbf50cf7555a8032833fc3484fe62
+14cedb7a40edcaec4a23e53627af6f145a502628
 ```
 
 This baseline includes:
 
+- robust Project Studio and recovery foundations;
+- unified project-first workspace;
 - English-first language selectors;
 - leading conjunction narration safeguard;
 - optional section-title narration;
-- unified project-first workspace;
 - benchmark framework;
 - persistent Colab/Kaggle startup caching;
-- existing Project Studio, recovery, AI-native server, MCP, tunnel and auth foundations.
-
-The roadmap status commit that marks P2 complete is documentation-only. If path filters do not trigger code workflows for that commit, the verified code baseline remains the squash-merge SHA above.
+- Lazy CPU ASR Startup;
+- AI-native server, Job Manager, REST/SSE/MCP, tunnel and auth foundations.
 
 ## P0 - Production Project Studio foundation
 
@@ -45,7 +45,7 @@ Status: **MERGED / VERIFIED**
 - [x] Separate section WAV files.
 - [x] Per-chunk generation and verification.
 - [x] Checkpoint/resume.
-- [x] Crash-safe `section-status.json`.
+- [x] Crash-safe section/chunk status.
 - [x] Skip verified work after restart.
 - [x] Regenerate one chunk only.
 - [x] Render selected sections.
@@ -68,8 +68,6 @@ Status: **MERGED / VERIFIED**
 - [x] Leading conjunction safeguard for fragile starts such as `Or`, `And`, and `But`.
 
 ### Production UX principle
-
-The primary workflow remains:
 
 ```text
 Script
@@ -98,6 +96,51 @@ Status: **MERGED / VERIFIED**
 - [x] CLI: `omnivoice-benchmark`.
 - [x] benchmark regression coverage.
 
+### Lazy CPU ASR Startup
+
+Status: **MERGED / VERIFIED**
+
+Final implementation and merge evidence:
+
+```text
+PR #51
+branch: feat/lazy-cpu-asr-startup
+final feature head: a75326c34313f9aa440e70df8d6d64480e07f536
+final feature tree: 14cedb7a40edcaec4a23e53627af6f145a502628
+
+squash merge SHA: b8cdb00fd07140e0f785991e5bfa5fac9486638b
+squash merge tree: 14cedb7a40edcaec4a23e53627af6f145a502628
+```
+
+Exact-head pre-merge CI at `a75326c34313f9aa440e70df8d6d64480e07f536`:
+
+- Lazy ASR startup safety #1 / run `34613754527`: PASS.
+- Unified Project Workspace tests #15 / run `34613754191`: PASS.
+- Robust long-form/project #322 / run `34613754423`: PASS.
+
+Post-merge exact-SHA CI at `b8cdb00fd07140e0f785991e5bfa5fac9486638b`:
+
+- Lazy ASR startup safety #2 / run `34614167021`: PASS.
+- Robust long-form/project #323 / run `34614167003`: PASS.
+
+Acceptance scope:
+
+- [x] CPU ASR is not constructed during Studio/server startup.
+- [x] first real transcription/verification initializes ASR.
+- [x] one model-scoped lock protects first initialization.
+- [x] concurrent first-use initializes exactly once.
+- [x] successful ASR pipeline is reused.
+- [x] failed first initialization does not publish a poisoned partial state.
+- [x] later request can retry after failed initialization.
+- [x] explicit accelerator ASR placement remains eager.
+- [x] direct Voice Doctor transcription remains functional through the lazy gate.
+- [x] REST/MCP/Gradio continue to share the same model/request path.
+- [x] fake-loader/call-count tests avoid real ASR model downloads in CI.
+- [x] full robust/project regression passed before and after merge.
+- [x] verification quality thresholds/semantics are unchanged.
+
+No synthetic startup-speed claim is recorded. Deterministic CI proves deferred CPU loader call-count and concurrency/retry safety; hosted timing remains a separate real-runtime measurement.
+
 ### Local-first Colab workspace
 
 Status: **SAFE CANDIDATE**
@@ -107,39 +150,24 @@ Goal:
 - use local Colab VM storage for active generation;
 - restore/sync persistent project state through a persistence boundary;
 - avoid Drive FUSE in the render hot path;
-- preserve existing checkpoint/resume semantics.
+- preserve checkpoint/resume semantics.
 
-Before production merge:
+Before promotion to a measured optimization claim:
 
-- [ ] benchmark local workspace vs direct Drive workspace;
+- [ ] benchmark local workspace vs direct Drive workspace on a real Colab runtime;
 - [ ] validate restore/sync after runtime restart;
 - [ ] validate no project-state regression;
 - [ ] document worst-case unsynced interval and recovery behavior.
 
-### Lazy CPU ASR startup
-
-Status: **SAFE CANDIDATE**
-
-The core model already supports on-demand ASR loading when transcription is first required.
-
-Planned production acceptance:
-
-- [ ] compare Studio startup time before/after;
-- [ ] verify first ASR request loads correctly;
-- [ ] verify explicit CPU ASR behavior;
-- [ ] preserve eager accelerator ASR placement where requested;
-- [ ] run full Project Studio and long-form regression;
-- [ ] confirm no verification quality change.
+The production notebook already uses local-first architecture. The remaining item is measured external-runtime evidence, not a code-path enablement blocker.
 
 ### Target-only inference
 
 Status: **EXPERIMENTAL**
 
-The `optimize` branch contains an experimental engine that projects audio logits only for target positions.
+The optimization branch contains an experimental engine that projects audio logits only for target positions. It remains outside production master behavior.
 
-Current evidence is not sufficient for production enablement.
-
-Required acceptance:
+Required acceptance before production enablement:
 
 - [ ] real GPU before/after benchmark;
 - [ ] same prompts/config/seeds where deterministic comparison is possible;
@@ -152,7 +180,7 @@ Required acceptance:
 - [ ] CUDA memory comparison;
 - [ ] no regression to training or stable inference APIs.
 
-**Rule:** do not merge or enable target-only inference solely because the mathematical projection test passes.
+**Rule:** do not merge or enable target-only inference solely because a mathematical projection test passes.
 
 ## P2 - Persistent Colab/Kaggle startup caching
 
@@ -170,13 +198,13 @@ squash merge SHA: d75d772b85332b40b66eb22f35d5c96ff56b2081
 squash merge tree: bb6d2e0e185dbf50cf7555a8032833fc3484fe62
 ```
 
-Exact-head pre-merge CI at `a74b1ba60ba0558bba4d444ce012ad04a676fb75`:
+Exact-head pre-merge CI:
 
 - Hosted runtime cache safety #14 / run `34607378458`: PASS.
 - Notebook JSON validation #27 / run `34607378477`: PASS.
 - Robust long-form/project #317 / run `34607378410`: PASS.
 
-Post-merge exact-SHA CI at `d75d772b85332b40b66eb22f35d5c96ff56b2081`:
+Post-merge exact-SHA CI:
 
 - Hosted runtime cache safety #15 / run `34607761811`: PASS.
 - Notebook JSON validation #28 / run `34607761677`: PASS.
@@ -184,36 +212,34 @@ Post-merge exact-SHA CI at `d75d772b85332b40b66eb22f35d5c96ff56b2081`:
 
 Acceptance scope:
 
-- [x] dependency/wheel cache implementation.
-- [x] pip cache implementation.
-- [x] Hugging Face/model cache implementation.
-- [x] Torch cache implementation.
-- [x] Whisper cache implementation.
-- [x] reusable workspace/cache metadata.
+- [x] dependency/wheel cache.
+- [x] pip cache.
+- [x] Hugging Face/model cache.
+- [x] Torch cache.
+- [x] Whisper cache.
+- [x] workspace/cache metadata.
 - [x] cache version/fingerprint.
 - [x] invalidation path.
 - [x] exact source-revision wheel path.
-- [x] exact source wheel integrity validation, including filename, byte size, SHA-256 and ZIP integrity before reuse.
-- [x] exact model/ASR revision fingerprinting and invalidation.
-- [x] interrupted/partial cache state is rejected rather than promoted.
-- [x] missing/truncated/corrupt cache trees fall back safely to cold startup.
+- [x] exact source wheel integrity: filename, size, SHA-256 and ZIP integrity.
+- [x] exact model/ASR revision fingerprinting/invalidation.
+- [x] interrupted/partial cache state rejection.
+- [x] missing/truncated/corrupt cache cold fallback.
 - [x] fast path.
-- [x] cold-start fallback.
-- [x] local SSD execution remains the generation hot path.
-- [x] merge to master after final review.
-- [x] verify post-merge exact-SHA CI.
+- [x] local SSD remains generation hot path.
+- [x] exact-head and exact-post-merge CI.
 
-Real Colab/Kaggle timing remains external-runtime evidence. No local CI timing is treated as a hosted-runtime speedup benchmark, and no cold/warm number is fabricated in this roadmap.
+Real Colab/Kaggle timing remains external-runtime evidence. No local CI timing is treated as a hosted speed benchmark.
 
-For real hosted evidence, preserve one cold and one warm `startup-cache-evidence.json` sample and run:
+For real hosted evidence preserve one genuine cold and warm `startup-cache-evidence.json` pair and run:
 
 ```bash
 python scripts/hosted_cache_acceptance.py cold.json warm.json
 ```
 
-The checker must confirm the exact package SHA, warm fast-path flags, valid timings and a faster warm bootstrap before a measured hosted-runtime result is recorded.
+The checker requires the same exact package SHA, warm fast-path flags, numeric timings and a faster warm bootstrap.
 
-- [ ] add a user-facing measured cold-start vs warm-start table from real Colab/Kaggle runs when that external-runtime evidence exists.
+- [ ] add a measured Colab/Kaggle cold-vs-warm table when real external-runtime evidence is collected.
 
 ### Follow-up cache work
 
@@ -228,9 +254,7 @@ Status: **PLANNED**
 
 Status: **FOUNDATION MERGED, COMMAND SURFACE PARTIAL**
 
-The Gradio UI remains first-class. REST and MCP use shared service/job layers rather than reimplementing TTS.
-
-### Application and server foundation
+### Application/server foundation
 
 Status: **MERGED / VERIFIED**
 
@@ -246,8 +270,8 @@ Status: **MERGED / VERIFIED**
 
 Status: **MERGED / VERIFIED**
 
-- [x] single-worker GPU job serialization.
-- [x] persistent `jobs.json`.
+- [x] single-worker GPU serialization.
+- [x] persistent jobs state.
 - [x] durable event history.
 - [x] idempotency keys.
 - [x] cooperative cancellation.
@@ -276,7 +300,7 @@ Planned:
 
 Status: **MERGED / VERIFIED**
 
-- [x] `GET /api/v1/jobs/{job_id}/stream`.
+- [x] job stream endpoint.
 - [x] durable replay.
 - [x] `Last-Event-ID` resume.
 - [x] heartbeat.
@@ -286,7 +310,7 @@ Status: **MERGED / VERIFIED**
 
 Status: **MERGED / VERIFIED**
 
-Current task-oriented tools:
+Current tools:
 
 - [x] `studio_status`.
 - [x] `list_projects`.
@@ -296,49 +320,32 @@ Current task-oriented tools:
 - [x] `get_job`.
 - [x] `cancel_job`.
 
-Resources:
-
-- [x] `omnivoice://projects/{project_id}`.
-- [x] `omnivoice://queue`.
-
 Planned:
 
 - [ ] preview tool.
 - [ ] regenerate tool.
 - [ ] merge/export tool.
-- [ ] explicit queue mutation tools after REST command contracts stabilize.
+- [ ] queue mutation tools after REST command contracts stabilize.
 
 ### Stable hostname / tunnel
 
 Status: **MERGED / VERIFIED**
 
-- [x] remotely-managed Cloudflare Tunnel support.
-- [x] `--tunnel`.
-- [x] `--public-url`.
-- [x] stable `/ui`, `/api/v1`, `/mcp`.
-- [x] tunnel token passed through a private temporary token file.
+- [x] remotely managed Cloudflare Tunnel support.
+- [x] stable `/ui`, `/api/v1`, `/mcp`, `/health` hostname.
+- [x] tunnel token kept out of raw child-process command line.
 - [x] MCP host/origin configuration from public URL.
 
 ### Authentication
 
 Status: **MERGED / VERIFIED**
 
-Machine/API auth:
-
 - [x] bearer token.
-- [x] `omnivoice:read`.
-- [x] `omnivoice:generate`.
-- [x] `omnivoice:queue`.
-- [x] `omnivoice:mcp`.
-- [x] `omnivoice:admin`.
+- [x] read/generate/queue/mcp/admin scopes.
 - [x] constant-time token comparison.
 - [x] 401 vs 403 semantics.
-
-UI protection:
-
-- [x] username/password configuration.
+- [x] optional UI username/password.
 - [x] fail-closed public deployment checks.
-- [x] explicit trusted external UI auth boundary.
 
 ### AI client integration
 
@@ -348,7 +355,6 @@ Status: **PLANNED**
 - [ ] ChatGPT integration example.
 - [ ] Claude Code integration example.
 - [ ] generic MCP client example.
-- [ ] Antigravity/other agent example where applicable.
 - [ ] sample idempotent long-running render workflow.
 
 ### Optional control plane
@@ -373,7 +379,7 @@ Planned:
 - [ ] heartbeat/offline state.
 - [ ] reconnect without client URL changes.
 - [ ] job assignment/recovery contract.
-- [ ] authentication between control plane and workers.
+- [ ] worker authentication.
 
 ## P4 - Verification efficiency and voice intelligence
 
@@ -389,11 +395,11 @@ Status: **PLANNED**
 
 - [ ] cheap verifier first.
 - [ ] stronger verifier only for borderline chunks.
-- [ ] benchmark accuracy vs memory/latency before enablement.
+- [ ] benchmark quality vs latency/memory before enablement.
 
 ### Same-language reference selection
 
-- [ ] when one voice has multiple language variants, prefer same-language reference.
+- [ ] prefer same-language reference when a voice has multiple language variants.
 - [ ] deterministic fallback when exact language variant is unavailable.
 - [ ] preserve explicit user-selected variant.
 
@@ -413,44 +419,36 @@ Status: **PLANNED**
 
 ## P6 - Upstream drift and compatibility protection
 
-Status: **NO CURRENT UPSTREAM DRIFT, GUARD PLANNED**
+Status: **NO CURRENT UPSTREAM DRIFT AT LAST REVIEW, GUARD PLANNED**
 
-Latest checked upstream:
+Last checked upstream checkpoint:
 
 ```text
 k2-fsa/OmniVoice master:
 08be0b4ccbac3e13e374e86fbfead4b4cac343e2
 ```
 
-At the review checkpoint, that commit is also the fork merge-base:
-
-```text
-fork ahead: 348 commits
-fork behind: 0 commits
-```
-
-Therefore there is no useful upstream delta to merge right now.
+At that review checkpoint the fork was ahead and not behind.
 
 Planned guard:
 
-- [ ] CI/report job that records upstream HEAD and merge-base.
-- [ ] fail or warn when fork becomes behind upstream.
+- [ ] CI/report job records upstream HEAD and merge-base.
+- [ ] warn/fail when fork becomes behind upstream.
 - [ ] classify upstream changes by model/tokenizer/inference/training/dependency/docs.
-- [ ] require regression protection before integrating risky upstream changes.
-- [ ] maintain a compatibility note for each upstream sync.
-- [ ] never blindly merge upstream master into the production fork.
+- [ ] require regression protection before integrating risky changes.
+- [ ] maintain compatibility notes for each upstream sync.
+- [ ] never blindly merge upstream master into production fork.
 
 ## Next production order
 
-1. Audit and validate lazy CPU ASR startup as a separate safe optimization.
-2. Collect real Colab/Kaggle cold/warm evidence when a hosted runtime is available; do not substitute local timing.
-3. Validate local-first Colab workspace with measured I/O/startup improvement.
-4. Update all AI-native docs to the actual merged Job Manager/SSE/MCP/tunnel/auth state.
-5. Add upstream drift guard.
-6. Add missing write REST/MCP commands.
-7. Add Universal OmniVoice Skill and agent examples.
-8. Continue verification/cache intelligence.
-9. Evaluate target-only inference only after real quality acceptance.
+1. Collect real Colab/Kaggle cold/warm startup-cache evidence using the exact-revision acceptance workflow.
+2. Validate local-first Colab workspace with measured I/O/startup evidence and restart recovery.
+3. Add upstream drift guard automation.
+4. Add missing write REST/MCP commands.
+5. Add Universal OmniVoice Skill and agent integration examples.
+6. Continue verification/cache intelligence.
+7. Improve authoring/export production tooling.
+8. Evaluate target-only inference only after separate real quality and GPU acceptance.
 
 ## Architectural rules
 
@@ -460,7 +458,7 @@ A faster path is accepted only when it preserves output/quality semantics or has
 
 ### Remote persistence is not the render hot path
 
-Hosted runtimes should generate on local SSD, then sync/export through a persistence boundary.
+Hosted runtimes generate on local SSD, then sync/export through a persistence boundary.
 
 ### Long-running commands return durable job IDs
 
