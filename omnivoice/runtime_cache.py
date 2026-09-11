@@ -228,8 +228,6 @@ def _sync_tree(source: Path, destination: Path) -> None:
     if not source.exists():
         return
     destination.mkdir(parents=True, exist_ok=True)
-    # Follow symlinks when copying. Hugging Face snapshots often link into a
-    # blob store; dereferencing keeps a Drive/Kaggle export self-contained.
     shutil.copytree(
         source,
         destination,
@@ -252,12 +250,7 @@ def _reset_cache_tree(namespace: Path) -> None:
 
 
 def _tree_inventory(namespace: Path) -> dict[str, dict[str, int]]:
-    """Return a lightweight structural inventory without hashing large models.
-
-    File count and total byte size are cheap enough for hosted startup while
-    still detecting missing/truncated/partial exports. Exact package wheels are
-    additionally SHA-256 verified by the hosted-notebook bootstrap.
-    """
+    """Return a cheap structural inventory without hashing large model files."""
 
     result: dict[str, dict[str, int]] = {}
     for name in CACHE_DIR_NAMES:
@@ -462,8 +455,6 @@ def persist_runtime_cache(preparation: CachePreparation) -> Optional[Path]:
     _ensure_cache_tree(local)
     target.mkdir(parents=True, exist_ok=True)
 
-    # Invalidate any previous ready marker before touching cache contents. If the
-    # copy is interrupted, the next session observes ``writing`` and goes cold.
     _write_metadata(
         target,
         preparation.fingerprint,
@@ -487,6 +478,14 @@ def persist_runtime_cache(preparation: CachePreparation) -> Optional[Path]:
         restored_from=preparation.restored_from,
         inventory=inventory,
         reason="cache export completed",
+    )
+    _write_metadata(
+        local,
+        preparation.fingerprint,
+        state="ready",
+        restored_from=preparation.restored_from,
+        inventory=_tree_inventory(local),
+        reason="local cache persisted successfully",
     )
     return target
 
