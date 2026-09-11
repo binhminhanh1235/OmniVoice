@@ -7,8 +7,10 @@ on:
       - "notebooks/hosted_runtime_bootstrap.py"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "scripts/hosted_cache_acceptance.py"
       - "tests/test_runtime_cache.py"
       - "tests/test_hosted_runtime_bootstrap.py"
+      - "tests/test_hosted_cache_acceptance.py"
       - ".github/workflows/hosted-runtime-cache-tests.yml"
   push:
     branches:
@@ -19,8 +21,10 @@ on:
       - "notebooks/hosted_runtime_bootstrap.py"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "scripts/hosted_cache_acceptance.py"
       - "tests/test_runtime_cache.py"
       - "tests/test_hosted_runtime_bootstrap.py"
+      - "tests/test_hosted_cache_acceptance.py"
       - ".github/workflows/hosted-runtime-cache-tests.yml"
 
 jobs:
@@ -40,9 +44,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . pytest
 
-      - name: Compile cache bootstrap
+      - name: Compile cache bootstrap and acceptance checker
         run: |
-          python -m py_compile omnivoice/runtime_cache.py notebooks/hosted_runtime_bootstrap.py
+          python -m py_compile \
+            omnivoice/runtime_cache.py \
+            notebooks/hosted_runtime_bootstrap.py \
+            scripts/hosted_cache_acceptance.py
 
       - name: Validate hosted notebook JSON
         run: |
@@ -51,4 +58,7 @@ jobs:
 
       - name: Run cache safety acceptance tests
         run: |
-          pytest -q tests/test_runtime_cache.py tests/test_hosted_runtime_bootstrap.py
+          pytest -q \
+            tests/test_runtime_cache.py \
+            tests/test_hosted_runtime_bootstrap.py \
+            tests/test_hosted_cache_acceptance.py
