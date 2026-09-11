@@ -1,101 +1,73 @@
 # OmniVoice Studio - Hướng dẫn đầy đủ
 
-Tài liệu này mô tả cách cài đặt, vận hành và phục hồi OmniVoice Studio theo workflow production. Nếu chỉ cần chạy nhanh, xem [GUIDE-COMPACT.vi.md](GUIDE-COMPACT.vi.md).
+Tài liệu này mô tả production workflow hiện tại của fork `binhminhanh1235/OmniVoice`: local Studio, Colab/Kaggle, persistent startup cache, Lazy CPU ASR Startup, project recovery, REST/SSE/MCP, stable tunnel, security và acceptance.
 
-## 1. OmniVoice Studio là gì?
+Nếu chỉ cần chạy nhanh, xem [GUIDE-COMPACT.vi.md](GUIDE-COMPACT.vi.md). Quy trình đo cold/warm chính thức nằm ở [production-acceptance.md](production-acceptance.md).
 
-OmniVoice core là mô hình TTS zero-shot đa ngôn ngữ. OmniVoice Studio bổ sung lớp production để xử lý các bài toán mà một lệnh `generate()` đơn lẻ không giải quyết tốt:
+## 1. Mục tiêu của OmniVoice Studio
 
-- nội dung dài nhiều section;
-- runtime Colab/Kaggle có thể bị ngắt;
-- cần resume mà không mất phần đã render;
-- cần kiểm tra quality theo chunk;
-- cần regenerate đúng phần lỗi;
-- cần quản lý voice/reference lâu dài;
-- cần queue nhiều project;
-- cần API/MCP để AI client điều khiển;
-- cần stable hostname và auth;
-- cần benchmark trước khi merge optimization.
+Upstream OmniVoice cung cấp model TTS multilingual/zero-shot. Fork này bổ sung lớp production để xử lý nội dung dài và runtime dễ bị ngắt như Colab/Kaggle.
 
-Kiến trúc khái quát:
-
-```text
-                   OmniVoice Studio
-                         |
-          +--------------+--------------+
-          |              |              |
-        /ui           /api/v1          /mcp
-       Gradio           REST            MCP
-          |              |              |
-          +------ Application Layer ----+
-                         |
-                 Persistent Job Manager
-                         |
-       Project / Voice / Queue / History
-                         |
-                    OmniVoice Core
-```
-
-## 2. Khái niệm dữ liệu
-
-Studio tổ chức narration theo:
+Studio tổ chức dữ liệu theo:
 
 ```text
 Project
-  Section
-    Beat
-      Chunk
+  -> Section
+      -> Beat
+          -> Chunk
 ```
 
-### Project
+Mỗi project có script, voice settings, quality settings, trạng thái chunk/section, history, output và checkpoint riêng.
 
-Một video, podcast, audiobook chapter hoặc một production unit hoàn chỉnh.
+Mục tiêu chính:
 
-Project giữ:
+- render dài mà có thể resume;
+- regenerate đúng phần lỗi;
+- reuse voice prompt;
+- verify chất lượng bằng ASR khi cần;
+- chạy tốt trên hosted GPU;
+- tách active local-SSD hot path khỏi persistence remote;
+- expose API/MCP để agent/tool có thể điều khiển.
 
-- script gốc;
-- project manifest;
-- studio settings;
-- section/chunk state;
-- generated audio;
-- history;
-- output.
+## 2. Trạng thái production hiện tại
 
-### Section
+Các foundation đã merge gồm:
 
-Một phần logic của script, thường được đánh dấu bằng:
+- robust long-form Project Studio;
+- unified project-first workspace;
+- Voice Library + Style Bank;
+- Text Doctor, Voice Doctor, Voice Stability;
+- preview + version history;
+- queue + resume/recovery;
+- English-first language selector;
+- leading conjunction pronunciation protection;
+- optional section-title narration;
+- REST/OpenAPI;
+- async Job Manager;
+- SSE progress/replay;
+- Streamable HTTP MCP;
+- bearer auth/scopes + optional UI Basic Auth;
+- Cloudflare named tunnel;
+- benchmark framework;
+- Persistent Colab/Kaggle Startup Cache;
+- Lazy CPU ASR Startup.
 
-```markdown
-## S03 - 1:45-3:10
-```
+Hai hạng mục hosted-runtime cuối hiện ở trạng thái **MERGED / VERIFIED** trên `master`.
 
-Section có thể render độc lập.
+`Target-only inference` vẫn **Experimental**. Không xem đó là production path cho tới khi có benchmark và quality acceptance riêng.
 
-### Beat
+## 3. Cài đặt local
 
-Một đoạn có chung delivery/style intent.
-
-Ví dụ:
-
-```markdown
-[WARM] This is a warm opening.
-```
-
-### Chunk
-
-Đơn vị TTS nhỏ nhất được generate, verify, retry và regenerate độc lập.
-
-Đây là lớp giúp một lỗi nhỏ không buộc phải render lại cả section hoặc project.
-
-## 3. Cài đặt
-
-### 3.1 Python environment
-
-Khuyến nghị Python virtual environment sạch.
+### 3.1 NVIDIA CUDA 12.8
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+
+pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 \
+  --extra-index-url https://download.pytorch.org/whl/cu128
+
+pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
 ```
 
 Windows:
@@ -104,37 +76,18 @@ Windows:
 .venv\Scripts\activate
 ```
 
-Không bắt buộc dùng `uv`.
-
-### 3.2 NVIDIA GPU
-
-Ví dụ CUDA 12.8:
+### 3.2 Apple Silicon
 
 ```bash
-pip install torch==2.8.0+cu128 torchaudio==2.8.0+cu128 \
-  --extra-index-url https://download.pytorch.org/whl/cu128
-
-pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
-```
-
-Nếu CUDA version khác, chọn PyTorch wheel phù hợp với môi trường.
-
-### 3.3 Apple Silicon
-
-```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install torch==2.8.0 torchaudio==2.8.0
 pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
 ```
 
-Python API có thể dùng:
+Direct Python inference có thể dùng `device_map="mps"`. Với workload dài, throughput tốt nhất vẫn thường đến từ accelerator runtime phù hợp.
 
-```python
-device_map="mps"
-```
-
-Local Apple Silicon phù hợp để test/authoring. Với workload dài, GPU hosted thường thuận lợi hơn về throughput.
-
-### 3.4 Development checkout
+### 3.3 Development install
 
 ```bash
 git clone https://github.com/binhminhanh1235/OmniVoice.git
@@ -142,11 +95,9 @@ cd OmniVoice
 pip install -e .
 ```
 
-## 4. Chọn launcher
+## 4. Chạy Studio
 
 ### 4.1 Project Studio UI
-
-Dùng khi bạn muốn thao tác bằng web UI:
 
 ```bash
 omnivoice-project-studio \
@@ -154,7 +105,7 @@ omnivoice-project-studio \
   --port 7860
 ```
 
-Temporary Gradio share:
+Nếu cần temporary Gradio public URL:
 
 ```bash
 omnivoice-project-studio \
@@ -165,8 +116,6 @@ omnivoice-project-studio \
 
 ### 4.2 Unified server
 
-Dùng khi cần UI + REST + SSE + MCP:
-
 ```bash
 omnivoice-studio serve \
   --workspace ./OmniVoiceStudio \
@@ -174,95 +123,184 @@ omnivoice-studio serve \
   --port 8000
 ```
 
-Surfaces:
+Một process cung cấp:
 
 ```text
-/ui
-/api/v1
-/api/v1/jobs/{id}/stream
-/mcp
-/health
-/docs
+/ui                         Gradio
+/api/v1                     REST
+/api/v1/jobs/{id}/stream    SSE
+/mcp                        Streamable HTTP MCP
+/health                     health check
+/docs                       OpenAPI
 ```
 
-## 5. Workspace
+## 5. Workflow project-first
 
-Workspace là root chứa state của Studio.
+### 5.1 Chuẩn bị voice
+
+Reference audio nên:
+
+- sạch, ít noise;
+- không có background music nếu tránh được;
+- thường 3-10 giây là hợp lý;
+- có transcript chính xác nếu có thể.
+
+Nếu bạn nhập transcript chính xác, clone prompt không cần ASR chỉ để đoán transcript reference.
+
+Sau khi tạo voice, lưu vào Voice Library để các session sau reuse prompt đã encode.
+
+### 5.2 Script format
 
 Ví dụ:
 
-```text
-OmniVoiceStudio/
-  voices/
-  projects/
-  jobs.json
-  project-queue.json
-  hardware-quality.json
-  ...
+```markdown
+# Video title
+
+## S01 - 0:00-0:45
+### Opening
+
+[WARM] Not every time you step in, you are actually helping.
+
+## S02 - 0:45-1:30
+### The pattern
+
+[SOFT] The question is what happens next.
+Do they own what is true?
+Or do they rewrite the conversation until you become the villain?
 ```
 
-### Quy tắc quan trọng
+Các heading mặc định là metadata. Bật **Read section titles (###)** nếu muốn đọc `###` thành tiếng.
 
-**Execution storage và persistent storage không nhất thiết phải là cùng một nơi.**
+Style tags như `[WARM]`, `[SOFT]`, `[PRAYER]`, `[EMPHASIZE]` được dùng để chọn style/voice behavior, không phải literal text để đọc.
 
-Với hosted runtime, active generation nên chạy trên local SSD để tránh latency của remote filesystem.
+### 5.3 Leading conjunction protection
 
-## 6. Colab
+Các câu bắt đầu bằng `Or`, `And`, `But` có thể mất ngữ cảnh nếu chunking tách quá gắt. Studio có logic bảo vệ/merge khi an toàn để giảm trường hợp đọc sai hoặc nuốt từ đầu câu.
 
-Mô hình khuyến nghị:
+Không nên tự chèn punctuation giả chỉ để “ép” model nếu chưa cần. Giữ script tự nhiên trước, sau đó dùng Text Doctor/preview để xác nhận.
+
+### 5.4 Preview
+
+Trước full render, nghe ít nhất:
+
+- opening;
+- một đoạn giữa;
+- ending;
+- một đoạn có style mạnh nếu project dùng nhiều style tags.
+
+Kiểm tra:
+
+- voice identity;
+- pronunciation;
+- pacing;
+- loudness;
+- style fit;
+- reference noise;
+- section-title behavior.
+
+### 5.5 Render
+
+Khuyến nghị mặc định:
 
 ```text
-Google Drive
-  persistent copy
-       |
-       | restore / mirror
-       v
-/content/OmniVoiceStudio
-  active local workspace
-       |
-       v
- generation + checkpoints
+Voice variant: AUTO
+Quality preset: BALANCED
+Resume: ON
+Language: chọn rõ nếu biết
 ```
 
-Lợi ích:
+Có thể render toàn bộ hoặc chỉ một số section.
 
-- giảm latency khi tạo nhiều file nhỏ;
-- không đẩy render hot path qua Drive FUSE;
-- giữ checkpoint/resume logic;
-- có thể sync project/voice/output về Drive.
+### 5.6 Review và targeted regeneration
 
-Notebook maintained:
+Nếu một chunk fail verification hoặc nghe chưa đạt:
+
+1. xác định chunk/section;
+2. regenerate đúng phần đó;
+3. giữ nguyên phần đã verified;
+4. kiểm tra history nếu cần quay lại bản trước.
+
+Đây là lợi ích chính của project-first Studio so với render một file dài monolithic.
+
+### 5.7 Export
+
+Chỉ export final khi các section cần thiết đã đạt. Giữ project state, chunk WAV, section WAV và history để có thể sửa tiếp sau này.
+
+## 6. Quality presets
+
+| Preset | Mục tiêu |
+|---|---|
+| `SAFE` | verification/retry mạnh hơn |
+| `BALANCED` | production default khuyến nghị |
+| `FAST` | giảm generation/retry effort để ưu tiên throughput |
+
+Không nên bắt đầu bằng Advanced Settings. Dùng preset trước, chỉ override khi có lý do cụ thể và evidence từ preview/render.
+
+## 7. Resume và recovery
+
+Project state được lưu để runtime restart không buộc render lại từ đầu.
+
+Sau restart:
+
+1. restore/mount đúng workspace;
+2. mở cùng project;
+3. Generate/Resume;
+4. Studio skip phần đã complete;
+5. tiếp tục pending/failed work.
+
+Không tạo project mới chỉ vì Colab/Kaggle session mới.
+
+## 8. Local SSD là hot path
+
+Nguyên tắc production:
+
+```text
+active generation -> local SSD
+persistence       -> Drive / Kaggle Dataset / remote storage
+```
+
+Lý do:
+
+- checkpoint nhỏ và thường xuyên;
+- nhiều WAV/chunk file;
+- metadata updates;
+- random I/O;
+- remote/FUSE latency có thể làm pipeline chậm và dễ lỗi hơn.
+
+## 9. Colab production architecture
+
+Notebook:
 
 ```text
 notebooks/OmniVoice_Project_Studio_Colab.ipynb
 ```
 
-Bản đơn giản:
+Mô hình:
 
 ```text
-notebooks/OmniVoice_Project_Studio_Colab_Gradio.ipynb
+/content/drive/MyDrive/OmniVoiceStudio
+      persistent project mirror
+      persistent startup cache
+               |
+               | restore / sync
+               v
+/content/OmniVoiceStudio
+      active local-SSD workspace
 ```
 
-## 7. Kaggle
+Notebook production:
 
-Workspace local mặc định:
+- mount Drive;
+- resolve exact OmniVoice master SHA hoặc dùng `OMNIVOICE_PACKAGE_REF` exact SHA;
+- resolve exact model/ASR revision;
+- restore compatible cache;
+- install exact verified wheel;
+- restore project data về local SSD;
+- chạy Studio local-first;
+- sync project state về Drive;
+- persist runtime cache khi kết thúc.
 
-```text
-/kaggle/working/OmniVoiceStudio
-```
-
-`/kaggle/input` là read-only source, không phải render workspace.
-
-### Dual-T4
-
-Profile hợp lý:
-
-```text
-cuda:0 -> OmniVoice TTS
-cuda:1 -> Whisper verification
-```
-
-Nếu chỉ có một GPU, để Whisper trên CPU giúp giữ VRAM chính cho TTS.
+## 10. Kaggle production architecture
 
 Notebook:
 
@@ -270,505 +308,228 @@ Notebook:
 notebooks/OmniVoice_Project_Studio_Kaggle.ipynb
 ```
 
-Bản đơn giản:
+Active workspace:
 
 ```text
-notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb
+/kaggle/working/OmniVoiceStudio
 ```
 
-## 8. Persistent hosted-runtime cache
+Writable startup cache export:
 
-Persistent startup caching đang được tích hợp theo một PR riêng và chưa được xem là production feature cho tới khi merge vào `master`.
+```text
+/kaggle/working/OmniVoiceStartupCache
+```
 
-Mục tiêu:
+Attached startup cache Dataset ở session sau:
 
-- dependency/wheel cache;
+```text
+/kaggle/input/omnivoice-startup-cache
+```
+
+`/kaggle/input` là read-only. Không dùng nó làm render workspace.
+
+### Dual-T4 mapping
+
+Khi có hai T4:
+
+```text
+cuda:0 -> OmniVoice TTS
+cuda:1 -> Whisper ASR verification
+CPU     -> preprocessing/API/UI/file I/O
+```
+
+OmniVoice không bị sharding qua hai T4 trong production notebook hiện tại. T4 thứ hai được dùng riêng cho ASR verification.
+
+## 11. Persistent hosted startup cache
+
+### 11.1 Những gì được cache
+
+Bootstrap production quản lý:
+
 - pip cache;
-- Hugging Face model cache;
+- exact OmniVoice wheel cache;
+- Hugging Face/model cache;
 - Torch cache;
-- Whisper cache;
-- exact source-revision wheel;
-- cache metadata;
-- version fingerprint;
-- invalidation khi dependency/source thay đổi;
-- fast path khi cache hợp lệ;
-- cold-start fallback khi cache thiếu/hỏng;
-- local SSD vẫn là nơi active generation.
+- Whisper/ASR model cache;
+- metadata/fingerprint/inventory.
 
-Đây là startup optimization, không phải thay đổi inference algorithm.
+### 11.2 Exact-revision safety
 
-## 9. Voice workflow
+Cache không tự động chọn “last working revision”. Source được resolve thành exact 40-character SHA trước.
 
-### 9.1 Reference audio
+Model và ASR revision cũng được resolve/fingerprint. Nếu fingerprint khác, compatible cache fast path không được dùng.
 
-Nên dùng:
+### 11.3 Wheel integrity
 
-- 3-10 giây;
-- ít noise;
-- không clipping;
-- không có nhạc nền mạnh;
-- một speaker;
-- transcript chính xác.
+Cached exact wheel chỉ được reuse khi manifest khớp:
 
-### 9.2 Voice Library
+- package ref;
+- filename;
+- byte size;
+- SHA-256;
+- ZIP integrity.
 
-Voice Library lưu reusable prompt.
+Nếu corrupt/truncated/missing, bootstrap cold-fallback và rebuild thay vì giả vờ warm.
 
-Ví dụ structure:
+### 11.4 Interrupted cache
 
-```text
-voices/
-  narrator/
-    voice.json
-    prompts/
-      default.pt
-      warm.pt
-      soft.pt
-    references/
-      default.wav
-      warm.wav
-      soft.wav
-```
+Persistent cache chỉ fast-path khi metadata nói state ready và inventory thật trên disk khớp metadata. Partial/interrupted trees bị từ chối.
 
-### 9.3 Variant
+## 12. Cold/warm production acceptance
 
-Một voice có thể có:
-
-- `DEFAULT`
-- `WARM`
-- `SOFT`
-- `PRAYER`
-- `EMPHASIZE`
-
-Khi chọn `AUTO`, Style Resolver có thể chọn variant phù hợp với directive.
-
-## 10. Voice Doctor
-
-Dùng Voice Doctor trước khi production render nếu reference chưa được kiểm chứng.
-
-Các loại vấn đề cần chú ý:
-
-- quá ngắn/quá dài;
-- clipping;
-- silence quá nhiều;
-- level quá thấp;
-- DC offset;
-- noise;
-- dynamic bất thường.
-
-Voice Doctor không thay thế nghe bằng tai, nhưng giúp loại các lỗi reference rõ ràng.
-
-## 11. Voice Stability
-
-Voice Stability tạo nhiều probe thực để xem voice clone có ổn định qua các đoạn khác nhau hay không.
-
-Nên dùng trước khi render hàng chục phút nội dung.
-
-## 12. Script format
-
-Ví dụ:
-
-```markdown
-# 5 People You Should Stop Enabling
-
-## S01 - 0:00-0:45
-### Opening
-
-[WARM] Not every time you step in, you are actually helping.
-
-## S02 - 0:45-1:45
-### The pattern
-
-[SOFT] The question is what happens next.
-Do they come back and listen?
-Do they reflect?
-Do they own what is true?
-Or do they rewrite the conversation until you become the villain?
-```
-
-### Heading
-
-`#`, `##`, `###` là project metadata theo mặc định.
-
-### Optional title narration
-
-Bật:
+Bootstrap ghi:
 
 ```text
-Read section titles (###)
+startup-cache-evidence.json
 ```
 
-khi muốn `###` trở thành first spoken beat.
-
-### Directive
-
-Các generic style intent:
+Cần hai mẫu thật:
 
 ```text
-[WARM]
-[SOFT]
-[EMPHASIZE]
-[NORMAL]
+cold.json
+warm.json
 ```
 
-Các tag này không bị đọc trực tiếp.
+Cùng exact `package_ref`.
 
-### Native voice-design attribute
-
-Một số directive có thể map sang attribute mà OmniVoice thực sự hỗ trợ, ví dụ whisper/pitch, thay vì gửi generic intent không được model định nghĩa.
-
-## 13. Leading conjunction safeguard
-
-Các từ đầu câu như:
-
-```text
-Or
-And
-But
-So
-Yet
-Nor
-```
-
-có thể nghe sai nếu bị tách thành chunk đứng riêng.
-
-Narration parser cố giữ conjunction với chunk trước khi:
-
-- có previous chunk;
-- không phá paragraph boundary;
-- combined chunk vẫn nằm trong word/character limits.
-
-Mục tiêu là giữ ngữ cảnh phát âm mà không làm chunk quá dài.
-
-## 14. Language selector
-
-Studio dùng dropdown thay vì yêu cầu nhập language ID thủ công ở các luồng chính.
-
-English được đưa lên đầu danh sách.
-
-Backend vẫn dùng language ID như:
-
-```text
-en
-```
-
-nên UI convenience không thay đổi inference contract.
-
-## 15. Parse project
-
-Khi paste script, dùng Analyze/Parse trước.
-
-Kiểm tra:
-
-- section count;
-- beat count;
-- chunk count;
-- title behavior;
-- style;
-- section boundaries.
-
-Nếu cấu trúc sai, sửa script trước khi render.
-
-## 16. Quality preset
-
-### SAFE
-
-Dùng khi ưu tiên correctness/recovery hơn tốc độ.
-
-Đặc tính:
-
-- effort cao;
-- retry nhiều;
-- verification đầy đủ.
-
-### BALANCED
-
-Khuyến nghị production mặc định.
-
-Đây nên là điểm bắt đầu trước khi tinh chỉnh Advanced Settings.
-
-### FAST
-
-Giảm generation/retry effort.
-
-Phù hợp khi:
-
-- cần throughput;
-- script/reference đã ổn;
-- chấp nhận review thủ công nhiều hơn.
-
-## 17. Advanced Settings
-
-Advanced Settings là override theo project.
-
-Nguyên tắc:
-
-1. bắt đầu bằng preset;
-2. chỉ override khi có lý do cụ thể;
-3. lưu thay đổi theo project;
-4. reset về preset khi thử nghiệm không hiệu quả.
-
-Không nên biến Advanced Settings thành "wall of knobs" phải cấu hình cho mọi project.
-
-## 18. Preview
-
-Preview opening/middle/ending trước full render.
-
-Checklist:
-
-- voice identity;
-- accent;
-- pronunciation;
-- pacing;
-- style transition;
-- silence;
-- loudness.
-
-Nếu preview fail, không nên bắt đầu queue dài.
-
-## 19. Render
-
-Chọn:
-
-- project;
-- voice;
-- variant;
-- language;
-- quality preset;
-- section selection;
-- Resume.
-
-Khuyến nghị:
-
-```text
-Variant: AUTO
-Quality: BALANCED
-Resume: ON
-```
-
-## 20. Verification
-
-Chunk được quality gate kiểm tra sau generation.
-
-Verification có thể dùng ASR text comparison và pacing signals.
-
-Nếu output chưa đạt, hệ thống có thể retry/adapt tùy preset/config.
-
-## 21. Review
-
-Review theo section/chunk thay vì chỉ nghe file cuối.
-
-Nếu một chunk có vấn đề:
-
-1. xác định chunk;
-2. mark/regenerate chunk;
-3. giữ nguyên các chunk verified;
-4. review lại section.
-
-## 22. Section Version History
-
-Trước các thao tác có thể làm thay đổi output đã tốt, Studio có thể snapshot version để:
-
-- nghe lại;
-- so sánh;
-- restore.
-
-Điều này tránh "fix một lỗi nhỏ rồi mất bản tốt cũ".
-
-## 23. Resume
-
-Khi runtime chết:
-
-```text
-restart runtime
-   |
-restore workspace
-   |
-load project
-   |
-Generate / Resume
-   |
-skip verified
-   |
-continue pending
-```
-
-Không xóa manifest, chunk reports hoặc section status nếu mục tiêu là resume.
-
-## 24. Multi-project queue
-
-Queue phù hợp khi có nhiều project.
-
-Trạng thái project có thể gồm:
-
-```text
-PENDING
-GENERATING
-NEEDS_REVIEW
-FAILED
-DONE
-```
-
-Queue có thể:
-
-- chạy section-by-section;
-- pause cooperative;
-- continue sau project error;
-- skip completed work;
-- auto-merge tùy cấu hình.
-
-## 25. Export
-
-Sau review, merge section đã verified.
-
-Output production có thể gồm:
-
-- section WAV;
-- merged WAV;
-- timeline metadata;
-- project state để quay lại regenerate.
-
-Các export profile nâng cao như MP3 presets vẫn thuộc roadmap.
-
-## 26. Data backup
-
-Đừng xem runtime ephemeral là nơi lưu duy nhất.
-
-Nên backup:
-
-- `voices/`;
-- `projects/`;
-- project settings;
-- queue state nếu cần;
-- output;
-- cache metadata sau khi persistent cache được merge.
-
-## 27. Unified server
+Chạy:
 
 ```bash
-omnivoice-studio serve \
-  --workspace ./OmniVoiceStudio \
-  --host 127.0.0.1 \
-  --port 8000
+python scripts/hosted_cache_acceptance.py cold.json warm.json
 ```
 
-### Health
+PASS:
 
 ```text
-GET /health
+cold.package_ref == warm.package_ref
+warm.resource_fast_path == true
+warm.wheel_fast_path == true
+warm.bootstrap_seconds < cold.bootstrap_seconds
 ```
 
-### Capabilities
+Không dùng benchmark giả hoặc con số suy diễn từ CI.
+
+### Colab acceptance checkpoint
+
+Production notebook có biến:
+
+```python
+ACCEPTANCE_SAMPLE = ""
+```
+
+Cold run: đổi thành `"cold"` và chạy cell.
+
+Warm run sau restart: đổi thành `"warm"` và chạy cell.
+
+Evidence được lưu dưới exact package-ref trong Drive. Khi đủ hai mẫu, notebook fetch acceptance script từ cùng exact revision và chạy luôn.
+
+### Kaggle acceptance checkpoint
+
+Cold run:
+
+1. không attach compatible cache Dataset;
+2. bootstrap;
+3. set `ACCEPTANCE_SAMPLE = "cold"`;
+4. save/version `OmniVoiceStartupCache` thành Dataset.
+
+Warm run:
+
+1. attach Dataset;
+2. bootstrap từ đầu;
+3. set `ACCEPTANCE_SAMPLE = "warm"`;
+4. notebook copy cold evidence từ attached Dataset sang writable export tree;
+5. đủ cold/warm thì tự compare.
+
+## 13. Lazy CPU ASR Startup
+
+### 13.1 Mục tiêu
+
+CPU Whisper pipeline trước đây có thể làm server startup chậm dù user chưa cần transcription/verification.
+
+Với explicit CPU ASR:
 
 ```text
-GET /api/v1/capabilities
+--asr-device cpu
 ```
 
-### Hardware
+Studio hiện chỉ cấu hình ASR metadata lúc startup, chưa construct pipeline.
+
+### 13.2 Expected startup logs
 
 ```text
-GET /api/v1/hardware
+lazy_cpu_asr=True
+CPU ASR startup deferred until first transcription/verification request.
 ```
 
-### Projects
+Server/UI/API/MCP có thể ready trước khi CPU ASR pipeline được tạo.
+
+### 13.3 First real use
+
+ASR được initialize khi có first real operation cần ASR, ví dụ:
+
+- Voice Doctor transcription;
+- clone prompt không có `ref_text`;
+- robust verification.
+
+Expected log:
 
 ```text
-GET /api/v1/projects
-GET /api/v1/projects/{project_id}
+Initializing ASR on first use: model=... device=cpu
 ```
 
-### Queue
+### 13.4 Thread safety và retry
+
+Model-scoped lock bảo đảm concurrent first-use không tạo nhiều pipeline song song.
+
+Nếu load fail:
+
+- không publish partial pipe;
+- `_asr_pipe` vẫn không usable;
+- request sau có thể retry.
+
+### 13.5 Explicit accelerator không đổi
+
+Nếu:
 
 ```text
-GET /api/v1/queue
+--asr-device cuda:1
 ```
 
-## 28. Async generation API
+ASR vẫn eager. Đây là contract cố ý để không thay behavior của dedicated accelerator setup.
 
-Submit:
+Do đó Kaggle dual-T4 thường **không áp dụng lazy CPU ASR**, vì ASR được đặt trên `cuda:1`.
 
-```http
-POST /api/v1/projects/my-project/generate
-Idempotency-Key: my-project-render-v1
-Content-Type: application/json
+## 14. REST jobs
 
-{
-  "voice_name": "Narrator",
-  "voice_variant": "AUTO",
-  "language": "en",
-  "sections": ["S03", "S04"],
-  "resume": true,
-  "strict": false,
-  "quality_preset": "BALANCED"
-}
-```
+Unified server dùng async jobs cho generation dài.
 
-Server trả về job ngay, không block HTTP request cho tới khi render xong.
-
-## 29. Job Manager
-
-State chính:
+Typical flow:
 
 ```text
-QUEUED
-  |
-RUNNING
-  +--> COMPLETED
-  +--> FAILED
-  +--> CANCEL_REQUESTED -> safe checkpoint -> CANCELLED
+POST project generation
+  -> trả job_id
+GET job status/events
+  -> poll hoặc SSE stream
+POST cancel
+  -> cooperative cancellation
 ```
 
-### Single-GPU serialization
+Lợi ích:
 
-GPU-bound jobs chạy qua một worker queue để tránh nhiều task tranh cùng một GPU.
+- request không giữ connection nhiều phút;
+- agent/tool dễ theo dõi;
+- reconnect vẫn đọc được durable events;
+- idempotency giảm duplicate generation.
 
-### Idempotency
-
-Nếu client retry sau network timeout với cùng idempotency key, Job Manager có thể trả lại job cũ thay vì tạo duplicate render.
-
-### Recovery
-
-Job state được lưu, cho phép server phục hồi queued/running intent sau restart theo contract hiện tại.
-
-## 30. SSE
+## 15. MCP
 
 Endpoint:
 
 ```text
-GET /api/v1/jobs/{job_id}/stream
+http://HOST:PORT/mcp
 ```
 
-Events có thể gồm:
-
-```text
-queued
-started
-project.started
-section.started
-section.finished
-project.finished
-completed
-failed
-cancelled
-```
-
-Client reconnect có thể dùng:
-
-```http
-Last-Event-ID: 7
-```
-
-hoặc query cursor.
-
-## 31. MCP
-
-Endpoint:
-
-```text
-/mcp
-```
-
-Tools v1:
+Tools chính:
 
 ```text
 studio_status
@@ -780,75 +541,19 @@ get_job
 cancel_job
 ```
 
-Resources:
+`generate_project` trả durable `job_id`.
 
-```text
-omnivoice://projects/{project_id}
-omnivoice://queue
-```
+## 16. Stable public hostname
 
-### Agent workflow
+Dùng remotely managed Cloudflare Tunnel nếu muốn một hostname cố định cho agent/API.
 
-```text
-list_projects
-   |
-inspect_project
-   |
-generate_project
-   |
-job_id
-   |
-get_job / SSE
-```
-
-## 32. Authentication
-
-Machine/API token:
+Environment example:
 
 ```bash
 export OMNIVOICE_API_TOKEN="strong-secret"
-```
-
-Scopes:
-
-```text
-omnivoice:read
-omnivoice:generate
-omnivoice:queue
-omnivoice:mcp
-omnivoice:admin
-```
-
-Ví dụ:
-
-```bash
 export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
-```
-
-UI protection:
-
-```bash
 export OMNIVOICE_UI_USERNAME="studio"
 export OMNIVOICE_UI_PASSWORD="strong-password"
-```
-
-Không đặt token/password vào git.
-
-## 33. Stable Cloudflare Tunnel
-
-Một hostname cố định giúp client không phải đổi URL mỗi khi Colab/Kaggle session đổi.
-
-Ví dụ:
-
-```text
-https://omnivoice.example.com/ui
-https://omnivoice.example.com/api/v1
-https://omnivoice.example.com/mcp
-```
-
-Environment:
-
-```bash
 export CLOUDFLARE_TUNNEL_TOKEN="..."
 export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
 ```
@@ -864,244 +569,177 @@ omnivoice-studio serve \
   --public-url https://omnivoice.example.com
 ```
 
-Tunnel token được chuyển qua private token file thay vì raw command-line argument.
+Không commit token/password. Tunnel runtime không đặt raw tunnel token trực tiếp trên child-process command line.
 
-## 34. MCP transport security
+## 17. Security checklist
 
-Public MCP cần host/origin protection.
-
-Các biến có thể dùng:
-
-```bash
-export OMNIVOICE_MCP_ALLOWED_HOSTS="omnivoice.example.com,omnivoice.example.com:*"
-export OMNIVOICE_MCP_ALLOWED_ORIGINS="https://omnivoice.example.com"
+```text
+[ ] API token đủ mạnh
+[ ] Scope chỉ cấp đúng quyền cần dùng
+[ ] UI auth bật nếu public
+[ ] Không hard-code secret trong notebook
+[ ] Không commit Drive/Kaggle secret
+[ ] Không đưa token vào project metadata
+[ ] Public URL đúng hostname đã cấu hình
 ```
 
-Chỉ dùng:
-
-```bash
-OMNIVOICE_MCP_TRUST_PROXY=1
-```
-
-khi một trusted reverse proxy thực sự là security boundary.
-
-## 35. Benchmark
-
-CLI:
+## 18. Benchmark framework
 
 ```bash
 omnivoice-benchmark \
   --model k2-fsa/OmniVoice \
   --device cuda:0 \
-  --language en \
   --preset BALANCED \
-  --warmup 1 \
   --repeat 2 \
   --output benchmark.json
 ```
 
-Metrics:
+Framework có thể ghi model load time, generated audio duration, RTF và CUDA peak allocation khi environment hỗ trợ.
 
-- model load seconds;
-- elapsed generation seconds;
-- generated audio seconds;
-- weighted RTF;
-- median RTF;
-- peak CUDA memory.
+### Production rule
 
-## 36. Optimization policy
+Không merge speed optimization chỉ vì microbenchmark “có vẻ nhanh”. Cần:
 
-Mọi inference optimization phải qua:
+- real workload;
+- same input/settings;
+- quality acceptance;
+- memory evidence khi liên quan;
+- regression test;
+- exact-head CI;
+- post-merge exact-master verification.
 
-1. reproducible baseline;
-2. before/after benchmark;
-3. projection/output equivalence phù hợp;
-4. real TTS generation;
-5. ASR/text quality;
-6. perceptual listening;
-7. memory impact;
-8. long-form regression.
+## 19. Target-only inference
 
-## 37. Target-only inference
+Target-only inference vẫn experimental.
 
-Target-only inference hiện là **experimental**.
+Không bật production cho tới khi có tối thiểu:
 
-Ý tưởng là chỉ chạy audio projection trên target positions thay vì toàn bộ context positions.
+- real GPU speed benchmark;
+- projection/output equivalence;
+- real voice-clone acceptance;
+- ASR quality;
+- pacing;
+- perceptual A/B;
+- long-form acceptance;
+- memory evidence;
+- no training regression;
+- no API/CLI regression.
 
-Hiện unit test projection equivalence chưa đủ để kết luận production-safe.
+Persistent startup cache và Lazy CPU ASR không phải bằng chứng thay thế cho các gate trên.
 
-Trước khi bật cần:
+## 20. Troubleshooting
 
-- benchmark thật trên GPU;
-- cùng prompt/seed/config;
-- compare output;
-- ASR WER/similarity;
-- duration/pacing;
-- nghe A/B;
-- test clone voice và long-form;
-- kiểm tra memory.
-
-## 38. Upstream policy
-
-Fork không merge upstream mù.
-
-Checklist khi upstream thay đổi:
-
-- merge-base;
-- commits upstream mới;
-- model architecture;
-- tokenizer;
-- generation config;
-- dependency;
-- training;
-- Python API;
-- notebook compatibility;
-- Studio regression.
-
-Khi có drift, nên thêm regression test trước khi cherry-pick hoặc merge upstream fix.
-
-## 39. Troubleshooting
-
-### 39.1 CUDA OOM
-
-Thử theo thứ tự:
-
-1. dừng job khác;
-2. Whisper -> CPU hoặc GPU thứ hai;
-3. giảm workload/batch;
-4. dùng `BALANCED` hoặc `FAST`;
-5. restart runtime nếu fragmentation nặng.
-
-### 39.2 Whisper làm startup chậm
-
-Lazy CPU ASR đang được đánh giá như safe optimization. Cho tới khi merge, behavior production của master vẫn là contract hiện tại.
-
-### 39.3 Voice nghe khác reference
+### Startup cache không warm
 
 Kiểm tra:
 
-- reference length;
-- transcript;
-- language;
-- noise;
-- clipping;
-- cross-language accent transfer.
+- package ref có giống không;
+- model revision có đổi không;
+- ASR revision có đổi không;
+- cache Dataset/Drive path có đúng không;
+- `resource_fast_path`;
+- `wheel_fast_path`;
+- cache metadata/inventory.
 
-### 39.4 Một từ/câu phát âm sai
+Nếu fingerprint khác, cold fallback là behavior đúng.
 
-Dùng:
+### Warm time không nhanh hơn cold
 
-- pronunciation override;
-- chỉnh punctuation;
-- regenerate chunk;
-- tránh chunk bắt đầu bằng conjunction thiếu ngữ cảnh;
-- kiểm tra language.
+Không sửa evidence bằng tay. Kiểm tra network, Drive/Kaggle Dataset attach, pip/model cache path và liệu “cold” có thật sự cold hay không.
 
-### 39.5 Section title không được đọc
+### CPU ASR vẫn load lúc startup
 
-Bật:
+Kiểm tra launcher và argument:
 
 ```text
-Read section titles (###)
+--asr-device cpu
 ```
 
-### 39.6 Title bị đọc ngoài ý muốn
+Expected log phải có `lazy_cpu_asr=True`.
 
-Tắt checkbox. Default là không đọc title.
+Nếu bạn dùng `cuda:1`, eager ASR là đúng behavior.
 
-### 39.7 Runtime restart
+### First ASR request fail
 
-Restore workspace và Resume, không tạo project mới.
+Có thể retry request sau khi sửa nguyên nhân. Lazy gate được thiết kế để failed load không poison partial state.
 
-### 39.8 MCP 401
+### Project render chậm bất thường trên Colab
 
-Kiểm tra bearer token.
+Đảm bảo active workspace là `/content/OmniVoiceStudio`, không phải Drive FUSE.
 
-### 39.9 MCP 403
+### Kaggle không ghi được cache
 
-Token đúng nhưng thiếu scope.
+Đừng ghi vào `/kaggle/input`. Ghi vào `/kaggle/working/OmniVoiceStartupCache`, sau đó save/version thành Dataset.
 
-### 39.10 Tunnel online nhưng MCP lỗi host/origin
+## 21. Production acceptance checklist
 
-Kiểm tra:
+### Runtime
 
-- `OMNIVOICE_PUBLIC_URL`;
-- allowed hosts;
-- allowed origins;
-- reverse proxy config.
+```text
+[ ] Exact package SHA
+[ ] Exact model revision
+[ ] Exact ASR revision
+[ ] Local SSD workspace
+[ ] Persistent boundary configured
+```
 
-## 40. Production checklist trước render dài
+### Cache
 
-- [ ] Reference audio sạch.
-- [ ] Transcript reference đúng.
-- [ ] Voice Doctor không có lỗi nghiêm trọng.
-- [ ] Voice Stability chấp nhận được.
-- [ ] Language đúng.
-- [ ] Script parse đúng section.
-- [ ] Title narration đúng ý.
-- [ ] Preview opening/middle/ending ổn.
-- [ ] Quality preset đã chọn.
-- [ ] Workspace có đủ disk.
-- [ ] Persistence/backup đã chuẩn bị.
-- [ ] Resume bật.
-- [ ] Không có duplicate GPU job.
-- [ ] Nếu public server, auth đã bật.
+```text
+[ ] Cold sample genuine
+[ ] Warm sample genuine
+[ ] Same package_ref
+[ ] resource_fast_path=true on warm
+[ ] wheel_fast_path=true on warm
+[ ] warm bootstrap faster
+[ ] acceptance script PASS
+```
 
-## 41. Checklist sau render
+### ASR
 
-- [ ] Không còn failed chunk chưa xử lý.
-- [ ] Nghe spot-check đầu/giữa/cuối.
-- [ ] Review conjunction/pronunciation nhạy cảm.
-- [ ] Merge/export thành công.
-- [ ] Backup project state.
-- [ ] Backup final output.
-- [ ] Giữ project nếu còn khả năng sửa sau.
+CPU path:
 
-## 42. Phần đang triển khai và kế hoạch tiếp theo
+```text
+[ ] lazy_cpu_asr=True at startup
+[ ] deferred log observed
+[ ] first-use initialization observed
+[ ] later ASR reuse works
+```
 
-### In review
+Accelerator path:
 
-- Persistent Colab/Kaggle startup caching.
+```text
+[ ] explicit accelerator mapping intentional
+[ ] eager ASR expected
+```
 
-### Safe optimization cần benchmark/merge riêng
+### Functional
 
-- local-first Colab workspace;
-- lazy CPU ASR startup.
+```text
+[ ] UI starts
+[ ] /health works
+[ ] REST/OpenAPI works
+[ ] MCP works
+[ ] Script parsing works
+[ ] Voice Library works
+[ ] Preview works
+[ ] Render works
+[ ] Verification works
+[ ] Resume works
+[ ] Targeted regenerate works
+[ ] Export works
+```
 
-### Experimental
-
-- target-only inference.
-
-### Planned
-
-- cache verification/preprocessing metadata;
-- cascade verifier;
-- same-language reference selection;
-- additional write REST handlers cho preview/queue/regenerate/merge;
-- Universal OmniVoice Skill;
-- ChatGPT/Claude Code/agent examples;
-- persistent control plane + worker registry;
-- richer directive DSL;
-- phrase-level style;
-- timeline/silence editor;
-- WAV/MP3 export profiles;
-- unattended project CLI;
-- upstream drift CI guard.
-
-Roadmap canonical: [project-studio-roadmap.md](project-studio-roadmap.md).
-
-## 43. Tài liệu liên quan
+## 22. Tài liệu liên quan
 
 - [README tiếng Việt](../README.vi.md)
-- [README English](../README.md)
 - [Compact guide](GUIDE-COMPACT.vi.md)
-- [Roadmap](project-studio-roadmap.md)
+- [Production acceptance](production-acceptance.md)
+- [Project Studio roadmap](project-studio-roadmap.md)
 - [Project Studio](project-studio.md)
-- [Hardware/Quality](hardware-quality-presets.md)
-- [Advanced Settings](advanced-settings.md)
-- [AI-native foundation](ai-native-foundation.md)
-- [SSE](ai-native-sse.md)
 - [MCP](ai-native-mcp.md)
+- [SSE](ai-native-sse.md)
 - [Stable tunnel](stable-tunnel.md)
+- [Hardware/quality presets](hardware-quality-presets.md)
 - [Kaggle workspace](kaggle-local-workspace.md)
 - [Notebooks](../notebooks/README.md)
