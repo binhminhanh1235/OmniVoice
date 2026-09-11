@@ -30,6 +30,7 @@ from omnivoice import (
     RobustLongFormGenerator,
 )
 from omnivoice.cli.demo import build_demo, build_parser as build_base_parser
+from omnivoice.lazy_asr import configure_lazy_asr, should_defer_asr_startup
 from omnivoice.robust_longform import clean_tts_text, semantic_chunk_text
 from omnivoice.utils.common import get_best_device
 
@@ -308,22 +309,30 @@ def main(argv=None) -> int:
         return 0
 
     verify_with_asr = not args.no_asr
+    defer_cpu_asr = verify_with_asr and should_defer_asr_startup(args.asr_device)
     logger.info(
-        "Loading model from %s, device=%s, robust=%s, ASR=%s on %s",
+        "Loading model from %s, device=%s, robust=%s, ASR=%s on %s, lazy_cpu_asr=%s",
         checkpoint,
         device,
         not args.no_robust,
         verify_with_asr,
         args.asr_device,
+        defer_cpu_asr,
     )
     model = OmniVoice.from_pretrained(
         checkpoint,
         device_map=device,
         dtype=torch.float16,
-        load_asr=verify_with_asr,
+        load_asr=verify_with_asr and not defer_cpu_asr,
         asr_model_name=args.asr_model,
         asr_device=args.asr_device,
     )
+    if verify_with_asr:
+        configure_lazy_asr(
+            model,
+            model_name=args.asr_model,
+            device=args.asr_device,
+        )
     print("Model loaded.")
 
     robust_config = RobustLongFormConfig(

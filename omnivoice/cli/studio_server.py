@@ -15,6 +15,7 @@ import torch
 
 from omnivoice import OmniVoice
 from omnivoice.hardware_quality import detect_hardware
+from omnivoice.lazy_asr import configure_lazy_asr, should_defer_asr_startup
 from omnivoice.runtime_workspace import (
     RuntimeWorkspace,
     detect_runtime_workspace,
@@ -119,23 +120,32 @@ def serve(args) -> int:
     hardware = detect_hardware()
     device = args.device or get_best_device()
     public = _public_endpoint(args)
+    defer_cpu_asr = should_defer_asr_startup(args.asr_device)
 
     logger.info("Runtime: %s", runtime.summary())
     logger.info("Hardware: %s", hardware.summary())
     logger.info(
-        "Loading OmniVoice model=%s device=%s asr_device=%s",
+        "Loading OmniVoice model=%s device=%s asr_device=%s lazy_cpu_asr=%s",
         args.model,
         device,
         args.asr_device,
+        defer_cpu_asr,
     )
     model = OmniVoice.from_pretrained(
         args.model,
         device_map=device,
         dtype=torch.float16,
-        load_asr=True,
+        load_asr=not defer_cpu_asr,
         asr_model_name=args.asr_model,
         asr_device=args.asr_device,
     )
+    configure_lazy_asr(
+        model,
+        model_name=args.asr_model,
+        device=args.asr_device,
+    )
+    if defer_cpu_asr:
+        logger.info("CPU ASR startup deferred until first transcription/verification request.")
 
     app = create_studio_app(
         model,
