@@ -1,22 +1,29 @@
 # OmniVoice Studio - Hướng dẫn compact
 
-Bản này dành cho lúc bạn muốn chạy OmniVoice Studio nhanh, không cần đọc toàn bộ kiến trúc.
+Bản này dành cho lúc bạn muốn chạy OmniVoice Studio nhanh nhưng vẫn theo đúng production path hiện tại.
 
-Nếu cần mọi chi tiết về production, recovery, API/MCP, tunnel và benchmark, xem [GUIDE-FULL.vi.md](GUIDE-FULL.vi.md).
+Nếu cần kiến trúc, recovery, API/MCP, tunnel, cache acceptance và troubleshooting chi tiết, xem [GUIDE-FULL.vi.md](GUIDE-FULL.vi.md). Quy trình đo cold/warm chính thức nằm ở [production-acceptance.md](production-acceptance.md).
 
 ## 1. Chọn cách chạy
 
 | Nhu cầu | Cách nên dùng |
 |---|---|
 | Local có GPU | `omnivoice-project-studio` |
-| Colab | `notebooks/OmniVoice_Project_Studio_Colab.ipynb` |
-| Kaggle | `notebooks/OmniVoice_Project_Studio_Kaggle.ipynb` |
+| Colab production | `notebooks/OmniVoice_Project_Studio_Colab.ipynb` |
+| Kaggle production | `notebooks/OmniVoice_Project_Studio_Kaggle.ipynb` |
 | Chỉ cần Gradio đơn giản | notebook `*_Gradio.ipynb` |
-| Cần REST/SSE/MCP | `omnivoice-studio serve` |
+| Cần UI + REST + SSE + MCP | `omnivoice-studio serve` |
 
-## 2. Cài đặt local
+## 2. Trạng thái production quan trọng
 
-Không bắt buộc dùng `uv`.
+Hai optimization hosted-runtime đã ở trạng thái **MERGED / VERIFIED**:
+
+- Persistent Colab/Kaggle Startup Cache.
+- Lazy CPU ASR Startup.
+
+`Target-only inference` vẫn **Experimental** và chưa phải production path.
+
+## 3. Cài đặt local
 
 ### NVIDIA CUDA 12.8
 
@@ -45,7 +52,7 @@ pip install torch==2.8.0 torchaudio==2.8.0
 pip install "git+https://github.com/binhminhanh1235/OmniVoice.git@master"
 ```
 
-## 3. Chạy Studio
+## 4. Chạy Studio
 
 ```bash
 omnivoice-project-studio \
@@ -53,7 +60,7 @@ omnivoice-project-studio \
   --port 7860
 ```
 
-Nếu cần temporary public Gradio URL:
+Temporary public URL:
 
 ```bash
 omnivoice-project-studio \
@@ -62,19 +69,38 @@ omnivoice-project-studio \
   --share
 ```
 
-## 4. Workflow production
+Unified server:
+
+```bash
+omnivoice-studio serve \
+  --workspace ./OmniVoiceStudio \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+Endpoints:
+
+```text
+/ui
+/api/v1
+/docs
+/mcp
+/health
+```
+
+## 5. Workflow production
 
 ### Voice
 
-1. Upload reference audio sạch khoảng 3-10 giây.
+1. Dùng reference audio sạch, thường 3-10 giây.
 2. Nhập transcript chính xác nếu có.
 3. Chọn language.
 4. Save Voice.
-5. Có thể lưu nhiều variant như `DEFAULT`, `WARM`, `SOFT`, `PRAYER`.
+5. Tái sử dụng prompt ở session sau.
+
+Nếu có transcript chính xác, nhập luôn để tránh phải ASR reference audio ở bước tạo clone prompt.
 
 ### Script
-
-Ví dụ:
 
 ```markdown
 # Video title
@@ -93,20 +119,12 @@ Quy tắc:
 
 - `#`, `##`, `###` mặc định là metadata.
 - `[WARM]`, `[SOFT]`, `[EMPHASIZE]` là style metadata.
-- Bật **Read section titles (###)** nếu muốn đọc tiêu đề section.
-- Studio có safeguard để tránh tách `Or`, `And`, `But` thành chunk thiếu ngữ cảnh khi có thể merge an toàn.
+- Bật **Read section titles (###)** nếu muốn đọc tiêu đề.
+- Studio có safeguard cho các leading conjunction như `Or`, `And`, `But`.
 
 ### Preview
 
-Nghe preview trước khi render dài.
-
-Kiểm tra:
-
-- voice có đúng người/đúng chất không;
-- tốc độ nói;
-- pronunciation;
-- style;
-- volume/noise của reference.
+Nghe opening, middle và ending trước full render. Kiểm tra voice identity, pronunciation, pacing, style và reference quality.
 
 ### Render
 
@@ -114,16 +132,14 @@ Khuyến nghị:
 
 ```text
 Voice variant: AUTO
-Language: English hoặc ngôn ngữ cần dùng
 Quality preset: BALANCED
 Resume: ON
+Language: chọn rõ nếu biết
 ```
-
-Có thể render toàn bộ hoặc chỉ chọn section.
 
 ### Review
 
-Nếu một chunk lỗi:
+Nếu một chunk lỗi hoặc nghe chưa tự nhiên:
 
 1. chọn chunk;
 2. regenerate đúng chunk đó;
@@ -131,88 +147,141 @@ Nếu một chunk lỗi:
 
 ### Export
 
-Khi các section đạt yêu cầu, merge/export project.
+Khi section đạt yêu cầu, merge/export project. Giữ history để sửa lại sau nếu cần.
 
-## 5. Resume sau khi Colab/Kaggle restart
+## 6. Resume sau Colab/Kaggle restart
 
 Không tạo project mới.
-
-Làm lại:
 
 1. restore/mount persistent workspace;
 2. mở cùng project;
 3. Generate/Resume;
-4. Studio skip phần đã verified;
-5. tiếp tục phần pending.
+4. Studio skip phần đã hoàn thành;
+5. tiếp tục pending/failed work.
 
-Active generation nên chạy trên local SSD.
+## 7. Colab production
 
-## 6. Kaggle
+Notebook:
 
-Workspace chạy:
+```text
+notebooks/OmniVoice_Project_Studio_Colab.ipynb
+```
+
+Kiến trúc:
+
+```text
+Google Drive
+    persistent workspace + startup cache
+          |
+          | restore / sync
+          v
+/content/OmniVoiceStudio
+    active local-SSD render workspace
+```
+
+Không dùng Drive FUSE làm render hot path.
+
+### Cold/warm acceptance
+
+Notebook tạo `startup-cache-evidence.json` và có acceptance checkpoint.
+
+- Run cold thật: đặt `ACCEPTANCE_SAMPLE = "cold"` rồi lưu evidence.
+- Restart runtime với cache đã persist.
+- Run warm thật: đặt `ACCEPTANCE_SAMPLE = "warm"`.
+- Khi đủ hai file, notebook tự chạy exact-revision acceptance script.
+
+PASS yêu cầu:
+
+```text
+same package_ref
+warm.resource_fast_path == true
+warm.wheel_fast_path == true
+warm.bootstrap_seconds < cold.bootstrap_seconds
+```
+
+## 8. Kaggle production
+
+Notebook:
+
+```text
+notebooks/OmniVoice_Project_Studio_Kaggle.ipynb
+```
+
+Workspace:
 
 ```text
 /kaggle/working/OmniVoiceStudio
 ```
 
-Không dùng `/kaggle/input` làm writable render workspace.
-
-Nếu có dual-T4:
+Startup cache export:
 
 ```text
-cuda:0 -> OmniVoice
-cuda:1 -> Whisper verification khi phù hợp
+/kaggle/working/OmniVoiceStartupCache
 ```
 
-## 7. Colab
-
-Nên dùng mô hình:
+Sau cold run, save/version thư mục cache thành Kaggle Dataset `omnivoice-startup-cache`. Session sau attach tại:
 
 ```text
-Google Drive / persistent storage
-           |
-           | restore + sync
-           v
-/content/OmniVoiceStudio
-           |
-           v
-      active generation
+/kaggle/input/omnivoice-startup-cache
 ```
 
-Không nên để hàng nghìn file checkpoint/WAV trong render hot path đi trực tiếp qua Drive FUSE.
+Không dùng `/kaggle/input` làm writable workspace.
 
-## 8. Quality preset
+Nếu dual-T4:
+
+```text
+cuda:0 -> OmniVoice TTS
+cuda:1 -> Whisper ASR verification
+```
+
+Notebook sẽ copy cold acceptance evidence từ attached Dataset sang writable export tree trước khi ghi warm evidence.
+
+## 9. Lazy CPU ASR Startup
+
+Với:
+
+```text
+--asr-device cpu
+```
+
+Studio startup không construct Whisper pipeline ngay.
+
+Expected startup log:
+
+```text
+lazy_cpu_asr=True
+CPU ASR startup deferred until first transcription/verification request.
+```
+
+Khi có first real ASR request:
+
+```text
+Initializing ASR on first use: ... device=cpu
+```
+
+Sau đó cùng pipeline được reuse.
+
+Nếu first load fail, partial state không được publish; request sau có thể retry.
+
+Nếu explicit accelerator, ví dụ:
+
+```text
+--asr-device cuda:1
+```
+
+ASR vẫn eager. Đây là behavior cố ý, không phải regression.
+
+## 10. Quality preset
 
 | Preset | Khi dùng |
 |---|---|
-| `SAFE` | cần quality/retry mạnh |
-| `BALANCED` | production mặc định |
-| `FAST` | ưu tiên tốc độ |
+| `SAFE` | ưu tiên verification/recovery mạnh |
+| `BALANCED` | production default |
+| `FAST` | ưu tiên throughput hơn |
 
-Chỉ vào Advanced Settings khi preset chưa đủ.
+Chỉ dùng Advanced Settings khi preset chưa đủ.
 
-## 9. Unified REST/SSE/MCP server
-
-Chạy:
-
-```bash
-omnivoice-studio serve \
-  --workspace ./OmniVoiceStudio \
-  --host 127.0.0.1 \
-  --port 8000
-```
-
-Endpoints:
-
-```text
-http://127.0.0.1:8000/ui
-http://127.0.0.1:8000/docs
-http://127.0.0.1:8000/api/v1
-http://127.0.0.1:8000/mcp
-http://127.0.0.1:8000/health
-```
-
-## 10. MCP tools
+## 11. MCP tools
 
 ```text
 studio_status
@@ -224,90 +293,56 @@ get_job
 cancel_job
 ```
 
-Generation trả về `job_id`, không giữ tool call mở cho tới khi TTS xong.
+Generation trả `job_id`, không giữ tool call mở cho tới khi render xong.
 
-## 11. Public stable hostname
-
-Thiết lập secrets:
+## 12. Stable public hostname
 
 ```bash
 export OMNIVOICE_API_TOKEN="strong-secret"
 export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
 export OMNIVOICE_UI_USERNAME="studio"
 export OMNIVOICE_UI_PASSWORD="strong-password"
-
 export CLOUDFLARE_TUNNEL_TOKEN="..."
 export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
 ```
 
-Chạy:
+Không lưu secret trong git/notebook/project data.
 
-```bash
-omnivoice-studio serve \
-  --workspace ./OmniVoiceStudio \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --tunnel \
-  --public-url https://omnivoice.example.com
-```
-
-Không lưu secret trong git/notebook/project.
-
-## 12. Benchmark trước khi bật optimization
+## 13. Benchmark trước optimization
 
 ```bash
 omnivoice-benchmark \
+  --model k2-fsa/OmniVoice \
   --device cuda:0 \
   --preset BALANCED \
   --repeat 2 \
   --output benchmark.json
 ```
 
-Target-only inference vẫn experimental. Không bật production chỉ vì unit projection test pass.
+Không gọi một optimization là production-ready chỉ dựa trên giả định. Với hosted startup cache, phải có cold/warm evidence thật. Với target-only inference, vẫn cần real GPU benchmark + quality acceptance riêng.
 
-## 13. Khi có lỗi
+## 14. Production checklist ngắn
 
-### Out of memory
+```text
+[ ] Exact source revision resolved
+[ ] Model/ASR revisions resolved
+[ ] Active workspace nằm trên local SSD
+[ ] Project persistence đã cấu hình
+[ ] Voice preview đạt
+[ ] BALANCED/SAFE preset phù hợp
+[ ] Resume hoạt động
+[ ] Failed chunk regenerate đúng scope
+[ ] Export đạt
+[ ] Nếu đo cache: cold/warm cùng package_ref
+[ ] Nếu CPU ASR: startup deferred và first-use init được quan sát
+[ ] Không có secret trong artifact
+```
 
-- giảm workload;
-- dùng `BALANCED` hoặc `FAST`;
-- để Whisper trên CPU hoặc GPU thứ hai;
-- restart runtime nếu CUDA allocator bị phân mảnh nặng.
+## 15. Đọc tiếp
 
-### Reference voice không ổn
-
-- dùng audio 3-10 giây;
-- giảm noise;
-- transcript phải đúng;
-- thử Voice Doctor;
-- dùng reference cùng ngôn ngữ nếu muốn giảm accent transfer.
-
-### Render bị ngắt
-
-Không xóa project. Dùng Resume.
-
-### Một câu đọc sai
-
-Regenerate đúng chunk. Nếu là pronunciation đặc biệt, dùng pronunciation override hoặc chỉnh script.
-
-### MCP/API không vào được
-
-Kiểm tra:
-
-- `/health`;
-- bearer token;
-- scopes;
-- public URL;
-- MCP host/origin allowlist;
-- tunnel đang kết nối.
-
-## 14. Đọc thêm
-
-- [README tiếng Việt](../README.vi.md)
 - [Hướng dẫn đầy đủ](GUIDE-FULL.vi.md)
+- [Production acceptance](production-acceptance.md)
 - [Roadmap](project-studio-roadmap.md)
-- [Project Studio](project-studio.md)
-- [MCP](ai-native-mcp.md)
-- [SSE](ai-native-sse.md)
-- [Stable tunnel](stable-tunnel.md)
 - [Notebooks](../notebooks/README.md)
+- [MCP](ai-native-mcp.md)
+- [Stable tunnel](stable-tunnel.md)
