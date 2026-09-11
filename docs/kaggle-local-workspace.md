@@ -24,7 +24,7 @@ Project Studio treats Kaggle local SSD as an **execution workspace**, not as per
 
 Long-form generation creates many small checkpoint/report/audio files. Keeping the active project on Kaggle local storage avoids remote-filesystem latency and keeps the existing section/chunk resume logic unchanged.
 
-This phase intentionally does **not** implement Google Drive, rclone, object storage, or background synchronization.
+Project persistence remains separate from execution storage. Startup-resource persistence is now implemented independently: dependency wheels, pip downloads, Hugging Face/OmniVoice assets and Whisper assets can be restored from a compatible cache into local SSD before Studio starts.
 
 ## Default workspace detection
 
@@ -32,7 +32,7 @@ This phase intentionally does **not** implement Google Drive, rclone, object sto
 
 ```text
 Kaggle  -> /kaggle/working/OmniVoiceStudio
-Colab   -> mounted MyDrive when already available, otherwise /content/OmniVoiceStudio
+Colab   -> runtime detector may expose mounted MyDrive; the production Colab notebook explicitly runs generation from /content/OmniVoiceStudio and mirrors persistence outside the render hot path
 Local   -> ./OmniVoiceStudio
 ```
 
@@ -46,7 +46,7 @@ The Kaggle workspace is marked `ephemeral=True` and `persistence_backend="none"`
 
 `section-status.json` and `project-queue.json` still provide crash/resume behavior while the Kaggle working directory survives, but they do not protect against the Kaggle session being discarded.
 
-Remote persistence is a separate future layer. It should copy/synchronize the execution workspace without changing Project -> Section -> Beat -> Chunk generation semantics.
+Full Kaggle project persistence is still a separate layer. The startup cache does not make `/kaggle/working/OmniVoiceStudio` durable; it only avoids repeated install/model downloads. Project export/sync continues to use the separate Data Management boundary.
 
 ## Kaggle notebook
 
@@ -56,7 +56,7 @@ Use:
 notebooks/OmniVoice_Project_Studio_Kaggle.ipynb
 ```
 
-The notebook installs the Kaggle branch, validates the runtime/GPU, reports free local disk, and launches:
+The notebook resolves the exact current master revision, restores a compatible startup cache when available, installs an exact cached/rebuilt wheel, warms model/Whisper assets on local SSD, validates the runtime/GPU, reports free local disk, and launches:
 
 ```bash
 omnivoice-project-studio \
@@ -67,7 +67,7 @@ omnivoice-project-studio \
   --share
 ```
 
-T4-class runtimes should normally keep ASR on CPU so OmniVoice owns the GPU VRAM. Quality policy remains controlled by SAFE / BALANCED / FAST.
+On dual-T4 Kaggle sessions the production notebook pins OmniVoice to `cuda:0` and Whisper ASR to `cuda:1`; single-GPU sessions fall back to the hardware recommendation. Quality policy remains controlled by SAFE / BALANCED / FAST.
 
 ## Architectural boundary for future persistence
 
@@ -82,3 +82,23 @@ future persistent backend
 ```
 
 The execution path never needs to know whether persistence is Google Drive, another Drive account, S3-compatible storage, or something else.
+
+
+## Persistent startup cache
+
+The runtime cache is intentionally separate from the project workspace:
+
+```text
+/kaggle/input/omnivoice-startup-cache     read-only cache source (optional)
+                 |
+                 v
+/kaggle/working/.cache/omnivoice          runtime-local hot cache
+                 |
+                 v
+/kaggle/working/OmniVoiceStartupCache     cache export for next Dataset version
+```
+
+A compatible attached Dataset activates the fast path. A missing/incompatible
+cache falls back to normal network installation/download and produces a new
+cache export. See `docs/hosted-runtime-cache.md` for fingerprint and
+invalidation rules.
