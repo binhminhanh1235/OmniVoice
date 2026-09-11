@@ -8,9 +8,17 @@ Active generation always uses runtime-local SSD. Persistent storage is only a
 restore/export source for pip wheels, Hugging Face/model data, Torch caches and
 ASR/Whisper artifacts.
 
-Caches are namespaced by an environment fingerprint instead of deleting stale
-data in-place. A Python/image/package change therefore falls back to a cold
-cache without risking reuse of incompatible binaries.
+Cache reuse is deliberately fail-closed:
+
+* compatibility is namespaced by runtime/resource fingerprint;
+* persistent namespaces are reusable only after a completed ``ready`` export;
+* a structural inventory detects missing/truncated/partial cache trees;
+* an interrupted export is left in ``writing`` state and is never restored;
+* exact OmniVoice wheels are isolated by source revision and may be protected by
+  a SHA-256 wheel manifest in hosted notebooks.
+
+A cache problem therefore degrades to the cold path instead of silently
+changing the code/resource identity used by Studio.
 """
 
 from __future__ import annotations
@@ -24,14 +32,17 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional, Sequence
 
 from omnivoice.runtime_workspace import detect_runtime_environment
 
 
-CACHE_SCHEMA_VERSION = 1
-DEFAULT_CACHE_VERSION = "v1"
+CACHE_SCHEMA_VERSION = 2
+DEFAULT_CACHE_VERSION = "v2"
+DEFAULT_RESOURCE_SIGNATURE = "k2-fsa/OmniVoice|openai/whisper-small.en"
 CACHE_DIR_NAMES = ("pip", "wheels", "huggingface", "torch", "whisper")
+READY_STATES = frozenset({"ready"})
+LOCAL_READY_STATES = frozenset({"ready", "restored"})
 
 
 def _utc_now() -> str:
@@ -46,6 +57,7 @@ class RuntimeCacheFingerprint:
     system: str
     machine: str
     package_ref: str
+    resource_signature: str = DEFAULT_RESOURCE_SIGNATURE
 
     @classmethod
     def current(
@@ -53,6 +65,7 @@ class RuntimeCacheFingerprint:
         *,
         cache_version: str = DEFAULT_CACHE_VERSION,
         package_ref: str = "master",
+        resource_signature: str = DEFAULT_RESOURCE_SIGNATURE,
     ) -> "RuntimeCacheFingerprint":
         return cls(
             schema_version=CACHE_SCHEMA_VERSION,
@@ -61,6 +74,7 @@ class RuntimeCacheFingerprint:
             system=platform.system().lower(),
             machine=platform.machine().lower(),
             package_ref=str(package_ref),
+            resource_signature=str(resource_signature),
         )
 
     def compatibility_dict(self) -> dict[str, object]:
@@ -72,6 +86,7 @@ class RuntimeCacheFingerprint:
             "python_version": self.python_version,
             "system": self.system,
             "machine": self.machine,
+            "resource_signature": self.resource_signature,
         }
 
     @property
@@ -174,8 +189,6 @@ def detect_runtime_cache(
         if source_root is None and path_exists(conventional_dataset):
             source_root = conventional_dataset
         if persist_root is None:
-            # This becomes a reusable Kaggle output. Saving/versioning the notebook
-            # can publish it as a Dataset for a later session.
             persist_root = Path("/kaggle/working/OmniVoiceStartupCache")
 
     return RuntimeCacheLayout(
@@ -208,16 +221,7 @@ def _fingerprint_matches(
     if not payload:
         return False
     stored = payload.get("compatibility")
-    if isinstance(stored, dict):
-        return stored == fingerprint.compatibility_dict()
-    # Backward-compatible reader for early metadata written before package
-    # revisions were split from resource-cache compatibility.
-    legacy = payload.get("fingerprint")
-    if isinstance(legacy, dict):
-        legacy = dict(legacy)
-        legacy.pop("package_ref", None)
-        return legacy == fingerprint.compatibility_dict()
-    return False
+    return isinstance(stored, dict) and stored == fingerprint.compatibility_dict()
 
 
 def _sync_tree(source: Path, destination: Path) -> None:
@@ -241,20 +245,87 @@ def _ensure_cache_tree(namespace: Path) -> None:
         (namespace / name).mkdir(parents=True, exist_ok=True)
 
 
+def _reset_cache_tree(namespace: Path) -> None:
+    if namespace.exists():
+        shutil.rmtree(namespace)
+    _ensure_cache_tree(namespace)
+
+
+def _tree_inventory(namespace: Path) -> dict[str, dict[str, int]]:
+    """Return a lightweight structural inventory without hashing large models.
+
+    File count and total byte size are cheap enough for hosted startup while
+    still detecting missing/truncated/partial exports. Exact package wheels are
+    additionally SHA-256 verified by the hosted-notebook bootstrap.
+    """
+
+    result: dict[str, dict[str, int]] = {}
+    for name in CACHE_DIR_NAMES:
+        root = namespace / name
+        if not root.is_dir():
+            raise FileNotFoundError(f"missing cache component: {name}")
+        files = 0
+        total_bytes = 0
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            stat = path.stat()
+            files += 1
+            total_bytes += stat.st_size
+        result[name] = {"files": files, "bytes": total_bytes}
+    return result
+
+
+def _stored_inventory(payload: Optional[dict[str, object]]) -> Optional[dict[str, object]]:
+    if not payload:
+        return None
+    inventory = payload.get("inventory")
+    return inventory if isinstance(inventory, dict) else None
+
+
+def _validate_namespace(
+    namespace: Path,
+    fingerprint: RuntimeCacheFingerprint,
+    *,
+    allowed_states: Sequence[str] = ("ready",),
+) -> tuple[bool, str, Optional[dict[str, dict[str, int]]]]:
+    metadata = _read_metadata(namespace)
+    if metadata is None:
+        return False, "metadata missing or unreadable", None
+    if not _fingerprint_matches(metadata, fingerprint):
+        return False, "fingerprint is incompatible", None
+    state = metadata.get("state")
+    if state not in set(allowed_states):
+        return False, f"cache state is {state!r}, not reusable", None
+    expected = _stored_inventory(metadata)
+    if expected is None:
+        return False, "cache inventory missing", None
+    try:
+        actual = _tree_inventory(namespace)
+    except (OSError, FileNotFoundError) as exc:
+        return False, f"cache inventory unreadable: {exc}", None
+    if actual != expected:
+        return False, "cache inventory mismatch (missing/truncated/partial data)", actual
+    return True, "cache is structurally valid", actual
+
+
 def _write_metadata(
     namespace: Path,
     fingerprint: RuntimeCacheFingerprint,
     *,
     state: str,
     restored_from: Optional[Path] = None,
+    inventory: Optional[dict[str, dict[str, int]]] = None,
+    reason: Optional[str] = None,
 ) -> None:
     payload = {
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint.to_dict(),
         "compatibility": fingerprint.compatibility_dict(),
-        "last_package_ref": fingerprint.package_ref,
         "state": state,
         "restored_from": str(restored_from) if restored_from else None,
+        "inventory": inventory,
+        "reason": reason,
         "updated_at": _utc_now(),
     }
     path = _metadata_path(namespace)
@@ -264,42 +335,90 @@ def _write_metadata(
     temp.replace(path)
 
 
+def _cold_preparation(
+    layout: RuntimeCacheLayout,
+    fingerprint: RuntimeCacheFingerprint,
+    local: Path,
+    *,
+    reason: str,
+) -> CachePreparation:
+    _reset_cache_tree(local)
+    inventory = _tree_inventory(local)
+    _write_metadata(
+        local,
+        fingerprint,
+        state="cold",
+        inventory=inventory,
+        reason=reason,
+    )
+    return CachePreparation(
+        layout=layout,
+        fingerprint=fingerprint,
+        local_namespace=local,
+        fast_path=False,
+        restored_from=None,
+        reason=reason,
+    )
+
+
 def prepare_runtime_cache(
     layout: RuntimeCacheLayout,
     fingerprint: RuntimeCacheFingerprint,
 ) -> CachePreparation:
-    """Restore a compatible persistent cache into runtime-local SSD."""
+    """Restore a compatible, complete persistent cache into runtime-local SSD."""
 
     local = layout.local_namespace(fingerprint)
-    _ensure_cache_tree(local)
-
     source = layout.source_namespace(fingerprint)
     if source is None:
-        _write_metadata(local, fingerprint, state="cold")
-        return CachePreparation(
-            layout=layout,
-            fingerprint=fingerprint,
-            local_namespace=local,
-            fast_path=False,
-            restored_from=None,
+        return _cold_preparation(
+            layout,
+            fingerprint,
+            local,
             reason="no persistent cache source configured",
         )
 
-    metadata = _read_metadata(source)
-    if not _fingerprint_matches(metadata, fingerprint):
-        _write_metadata(local, fingerprint, state="cold")
-        return CachePreparation(
-            layout=layout,
-            fingerprint=fingerprint,
-            local_namespace=local,
-            fast_path=False,
-            restored_from=None,
-            reason="persistent cache missing or fingerprint is incompatible",
+    valid, validation_reason, source_inventory = _validate_namespace(
+        source,
+        fingerprint,
+        allowed_states=tuple(READY_STATES),
+    )
+    if not valid or source_inventory is None:
+        return _cold_preparation(
+            layout,
+            fingerprint,
+            local,
+            reason=f"persistent cache rejected: {validation_reason}",
         )
 
-    for name in CACHE_DIR_NAMES:
-        _sync_tree(source / name, local / name)
-    _write_metadata(local, fingerprint, state="restored", restored_from=source)
+    _reset_cache_tree(local)
+    try:
+        for name in CACHE_DIR_NAMES:
+            _sync_tree(source / name, local / name)
+        local_inventory = _tree_inventory(local)
+    except (OSError, shutil.Error) as exc:
+        return _cold_preparation(
+            layout,
+            fingerprint,
+            local,
+            reason=f"persistent cache restore failed; cold fallback: {exc}",
+        )
+
+    if local_inventory != source_inventory:
+        return _cold_preparation(
+            layout,
+            fingerprint,
+            local,
+            reason="persistent cache restore inventory mismatch; cold fallback",
+        )
+
+    _write_metadata(
+        local,
+        fingerprint,
+        state="restored",
+        restored_from=source,
+        inventory=local_inventory,
+        reason="compatible persistent cache restored to local SSD",
+    )
     return CachePreparation(
         layout=layout,
         fingerprint=fingerprint,
@@ -325,8 +444,6 @@ def apply_cache_environment(
         "HUGGINGFACE_HUB_CACHE": str(root / "huggingface" / "hub"),
         "TRANSFORMERS_CACHE": str(root / "huggingface" / "transformers"),
         "TORCH_HOME": str(root / "torch"),
-        # OmniVoice's Whisper models are resolved through Hugging Face today.
-        # Keep a dedicated ASR location for future/native Whisper consumers too.
         "OMNIVOICE_WHISPER_CACHE": str(root / "whisper"),
     }
     for key, value in values.items():
@@ -336,7 +453,7 @@ def apply_cache_environment(
 
 
 def persist_runtime_cache(preparation: CachePreparation) -> Optional[Path]:
-    """Export local cache contents to the compatible persistent namespace."""
+    """Export local cache contents with a fail-closed two-phase ready marker."""
 
     target = preparation.layout.persist_namespace(preparation.fingerprint)
     if target is None:
@@ -344,13 +461,32 @@ def persist_runtime_cache(preparation: CachePreparation) -> Optional[Path]:
     local = preparation.local_namespace
     _ensure_cache_tree(local)
     target.mkdir(parents=True, exist_ok=True)
+
+    # Invalidate any previous ready marker before touching cache contents. If the
+    # copy is interrupted, the next session observes ``writing`` and goes cold.
+    _write_metadata(
+        target,
+        preparation.fingerprint,
+        state="writing",
+        inventory=None,
+        restored_from=preparation.restored_from,
+        reason="cache export in progress",
+    )
+
     for name in CACHE_DIR_NAMES:
-        _sync_tree(local / name, target / name)
+        destination = target / name
+        if destination.exists():
+            shutil.rmtree(destination)
+        _sync_tree(local / name, destination)
+
+    inventory = _tree_inventory(target)
     _write_metadata(
         target,
         preparation.fingerprint,
         state="ready",
         restored_from=preparation.restored_from,
+        inventory=inventory,
+        reason="cache export completed",
     )
     return target
 
@@ -362,17 +498,30 @@ def cache_status(
     local = layout.local_namespace(fingerprint)
     source = layout.source_namespace(fingerprint)
     target = layout.persist_namespace(fingerprint)
+    local_ready, local_reason, _ = _validate_namespace(
+        local,
+        fingerprint,
+        allowed_states=tuple(LOCAL_READY_STATES),
+    )
+    if source is not None:
+        source_ready, source_reason, _ = _validate_namespace(
+            source,
+            fingerprint,
+            allowed_states=tuple(READY_STATES),
+        )
+    else:
+        source_ready, source_reason = False, "no persistent source configured"
     return {
         "environment": layout.environment,
         "fingerprint": fingerprint.to_dict(),
         "cache_key": fingerprint.key,
         "package_key": fingerprint.package_key,
         "local_namespace": str(local),
-        "local_ready": _fingerprint_matches(_read_metadata(local), fingerprint),
+        "local_ready": local_ready,
+        "local_reason": local_reason,
         "source_namespace": str(source) if source else None,
-        "source_ready": (
-            _fingerprint_matches(_read_metadata(source), fingerprint) if source else False
-        ),
+        "source_ready": source_ready,
+        "source_reason": source_reason,
         "persist_namespace": str(target) if target else None,
     }
 
@@ -393,7 +542,9 @@ def write_workspace_cache_metadata(
         "package_key": preparation.fingerprint.package_key,
         "package_ref": preparation.fingerprint.package_ref,
         "cache_version": preparation.fingerprint.cache_version,
+        "resource_signature": preparation.fingerprint.resource_signature,
         "fast_path": preparation.fast_path,
+        "reason": preparation.reason,
         "local_namespace": str(preparation.local_namespace),
         "source_root": (
             str(preparation.layout.source_root)
@@ -406,6 +557,36 @@ def write_workspace_cache_metadata(
             else None
         ),
         "updated_at": _utc_now(),
+    }
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    temp.replace(path)
+    return path
+
+
+def write_startup_cache_evidence(
+    workspace: Path | str,
+    preparation: CachePreparation,
+    *,
+    wheel_fast_path: bool,
+    bootstrap_seconds: float,
+) -> Path:
+    """Write one machine-readable hosted-startup measurement sample."""
+
+    root = Path(workspace).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "startup-cache-evidence.json"
+    payload = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "environment": preparation.layout.environment,
+        "package_ref": preparation.fingerprint.package_ref,
+        "cache_key": preparation.fingerprint.key,
+        "package_key": preparation.fingerprint.package_key,
+        "resource_fast_path": preparation.fast_path,
+        "wheel_fast_path": bool(wheel_fast_path),
+        "cache_reason": preparation.reason,
+        "bootstrap_seconds": round(float(bootstrap_seconds), 3),
+        "recorded_at": _utc_now(),
     }
     temp = path.with_suffix(".json.tmp")
     temp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
