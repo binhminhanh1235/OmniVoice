@@ -1,0 +1,54 @@
+name: Hosted runtime cache safety
+
+on:
+  pull_request:
+    paths:
+      - "omnivoice/runtime_cache.py"
+      - "notebooks/hosted_runtime_bootstrap.py"
+      - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "tests/test_runtime_cache.py"
+      - "tests/test_hosted_runtime_bootstrap.py"
+      - ".github/workflows/hosted-runtime-cache-tests.yml"
+  push:
+    branches:
+      - "master"
+      - "feat/persistent-hosted-runtime-cache"
+    paths:
+      - "omnivoice/runtime_cache.py"
+      - "notebooks/hosted_runtime_bootstrap.py"
+      - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "tests/test_runtime_cache.py"
+      - "tests/test_hosted_runtime_bootstrap.py"
+      - ".github/workflows/hosted-runtime-cache-tests.yml"
+
+jobs:
+  cache-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Compile cache bootstrap
+        run: |
+          python -m py_compile omnivoice/runtime_cache.py notebooks/hosted_runtime_bootstrap.py
+
+      - name: Validate hosted notebook JSON
+        run: |
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
+
+      - name: Run cache safety acceptance tests
+        run: |
+          pytest -q tests/test_runtime_cache.py tests/test_hosted_runtime_bootstrap.py
