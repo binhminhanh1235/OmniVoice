@@ -1,9 +1,12 @@
 import json
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from omnivoice.cli.studio_server import _announce_endpoints, _endpoint_lines
 from omnivoice.server.app import create_studio_app
 from omnivoice.services.job_manager import wait_for_terminal
+from omnivoice.tunnel import parse_public_url
 
 
 def write_pending_project(workspace):
@@ -277,3 +280,29 @@ def test_api_only_root_redirects_to_openapi(tmp_path):
     response = client.get("/")
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "/docs"
+
+
+def test_endpoint_lines_include_clickable_public_studio_urls():
+    args = SimpleNamespace(host="0.0.0.0", port=8000)
+    public = parse_public_url("https://demo.trycloudflare.com")
+
+    lines = _endpoint_lines(args, public)
+
+    assert "Studio UI: http://0.0.0.0:8000/ui" in lines
+    assert "PUBLIC STUDIO UI: https://demo.trycloudflare.com/ui" in lines
+    assert "Public REST API: https://demo.trycloudflare.com/api/v1" in lines
+    assert "Public OpenAPI: https://demo.trycloudflare.com/docs" in lines
+    assert "Public MCP: https://demo.trycloudflare.com/mcp" in lines
+    assert "Public Health: https://demo.trycloudflare.com/health" in lines
+
+
+def test_announce_endpoints_writes_stdout_when_notebook_logging_is_silent(capsys):
+    args = SimpleNamespace(host="0.0.0.0", port=8000)
+    public = parse_public_url("https://demo.trycloudflare.com")
+
+    _announce_endpoints(args, public)
+
+    output = capsys.readouterr().out
+    assert "OmniVoice Studio endpoints" in output
+    assert "PUBLIC STUDIO UI: https://demo.trycloudflare.com/ui" in output
+    assert "Public OpenAPI: https://demo.trycloudflare.com/docs" in output
