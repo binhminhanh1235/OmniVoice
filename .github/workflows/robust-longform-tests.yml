@@ -109,9 +109,11 @@ on:
       - "tests/test_demo_robust.py"
       - "tests/test_audio.py"
       - "tests/test_cli_postprocessing.py"
+      - "tests/test_hosted_notebook_acceptance.py"
       - "notebooks/OmniVoice_Robust_LongForm_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb"
       - ".github/workflows/robust-longform-tests.yml"
   push:
     branches:
@@ -143,6 +145,7 @@ on:
       - "feat/section-mp3-download"
       - "feat/section-download-all"
       - "feat/data-management-drive-sync"
+      - "feat/kaggle-gradio-full-studio"
 
 jobs:
   test:
@@ -172,6 +175,7 @@ jobs:
           python -m json.tool notebooks/OmniVoice_Robust_LongForm_Colab.ipynb >/dev/null
           python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
           python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb >/dev/null
 
       - name: Run robust long-form and project tests
         run: |
@@ -212,4 +216,5 @@ jobs:
             tests/test_project_studio.py \
             tests/test_project_studio_preview_ui.py \
             tests/test_project_studio_live_ui.py \
+            tests/test_hosted_notebook_acceptance.py \
             tests/test_demo_robust.py
