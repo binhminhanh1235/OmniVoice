@@ -38,6 +38,7 @@ def _find_acceptance_cell(notebook: dict) -> str:
     [
         "OmniVoice_Project_Studio_Colab.ipynb",
         "OmniVoice_Project_Studio_Kaggle.ipynb",
+        "OmniVoice_Project_Studio_Kaggle_Gradio.ipynb",
     ],
 )
 def test_production_acceptance_cell_is_python_and_exact_revision_bound(name):
@@ -85,3 +86,35 @@ def test_kaggle_acceptance_carries_cold_evidence_across_dataset_boundary():
     assert "--asr-device {ASR_DEVICE}" in all_source
     assert "/kaggle/working/OmniVoiceStudio" in all_source
     assert "/kaggle/input/omnivoice-startup-cache" in all_source
+
+
+def test_kaggle_gradio_notebook_exposes_full_studio_and_safe_public_modes():
+    notebook = _load_notebook("OmniVoice_Project_Studio_Kaggle_Gradio.ipynb")
+    acceptance = _find_acceptance_cell(notebook)
+    all_source = "\n".join(_cell_source(cell) for cell in notebook["cells"])
+
+    assert "bootstrap_hosted_runtime(PACKAGE_REF)" in all_source
+    assert "git+https://github.com/binhminhanh1235/OmniVoice.git@master" not in all_source
+    assert 'LAUNCH_MODE = "unified"' in all_source
+    assert '"gradio-share"' in all_source
+    assert "omnivoice-project-studio" in all_source
+    assert "omnivoice-studio" in all_source
+    assert '"serve"' in all_source
+    assert 'f"{PUBLIC_URL}/ui"' in all_source
+    assert 'f"{PUBLIC_URL}/api/v1"' in all_source
+    assert 'f"{PUBLIC_URL}/docs"' in all_source
+    assert 'f"{PUBLIC_URL}/mcp"' in all_source
+    assert 'f"{PUBLIC_URL}/health"' in all_source
+    assert "trycloudflare.com" in all_source
+    assert "OMNIVOICE_API_TOKEN" in all_source
+    assert "OMNIVOICE_UI_USERNAME" in all_source
+    assert "OMNIVOICE_UI_PASSWORD" in all_source
+    assert "OMNIVOICE_ALLOW_INSECURE_PUBLIC" in all_source
+    assert "CACHE_SOURCE_BASE" in acceptance
+    assert "CACHE_EXPORT_BASE" in acceptance
+    assert "source_acceptance" in acceptance
+    assert "shutil.copytree" in acceptance
+    assert "/kaggle/working/hosted_cache_acceptance.py" in acceptance
+    assert "/kaggle/working/OmniVoiceStartupCache" in all_source
+    assert "/kaggle/input/omnivoice-startup-cache" in all_source
+    assert "persist_runtime_cache(CACHE_PREPARATION)" in all_source
