@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Callable, Mapping, Optional
 
 CACHE_SCHEMA_VERSION = 2
 CACHE_VERSION = "v2"
@@ -172,11 +172,31 @@ def _resolve_hf_revision(
         ) from exc
 
 
-def _runtime_kind(environ: Mapping[str, str]) -> str:
+def _default_exists(path: Path) -> bool:
+    return path.exists()
+
+
+def _runtime_kind(
+    environ: Mapping[str, str],
+    *,
+    path_exists: Callable[[Path], bool] = _default_exists,
+) -> str:
+    """Detect hosted runtime with Kaggle taking precedence over leaked Colab markers.
+
+    Some notebook images or user-installed packages can leave compatibility
+    variables such as ``COLAB_GPU`` in the environment. A real Kaggle marker or
+    ``/kaggle/working`` must therefore win before considering Colab markers.
+    Keep this precedence aligned with ``omnivoice.runtime_workspace``.
+    """
+
+    if environ.get("KAGGLE_KERNEL_RUN_TYPE") or environ.get("KAGGLE_URL_BASE"):
+        return "kaggle"
+    if path_exists(Path("/kaggle/working")):
+        return "kaggle"
     if environ.get("COLAB_RELEASE_TAG") or environ.get("COLAB_GPU"):
         return "colab"
-    if environ.get("KAGGLE_KERNEL_RUN_TYPE") or Path("/kaggle/working").exists():
-        return "kaggle"
+    if path_exists(Path("/content")):
+        return "colab"
     raise RuntimeError("hosted_runtime_bootstrap supports Colab and Kaggle only")
 
 
@@ -348,6 +368,7 @@ def bootstrap_hosted_runtime(
         bootstrap_seconds=time.perf_counter() - started,
     )
 
+    print("Hosted runtime:", runtime)
     print("Package revision:", package_ref)
     print("OmniVoice model revision:", model_revision)
     print("ASR model revision:", asr_revision)
@@ -358,6 +379,7 @@ def bootstrap_hosted_runtime(
     print("Startup evidence:", evidence_path)
 
     return {
+        "HOSTED_RUNTIME": runtime,
         "ASR_MODEL": ASR_MODEL,
         "ASR_MODEL_REVISION": asr_revision,
         "MODEL_ID": MODEL_ID,

@@ -22,6 +22,37 @@ def test_exact_revision_validation_is_fail_closed():
         bootstrap.validate_exact_revision("abc123", label="test")
 
 
+def test_runtime_kind_prefers_explicit_kaggle_marker_over_colab_marker():
+    env = {
+        "KAGGLE_KERNEL_RUN_TYPE": "Interactive",
+        "COLAB_GPU": "1",
+    }
+
+    assert bootstrap._runtime_kind(env, path_exists=lambda path: False) == "kaggle"
+
+
+def test_runtime_kind_prefers_kaggle_path_over_leaked_colab_marker():
+    env = {"COLAB_GPU": "1"}
+
+    def path_exists(path: Path) -> bool:
+        return path == Path("/kaggle/working")
+
+    assert bootstrap._runtime_kind(env, path_exists=path_exists) == "kaggle"
+
+
+def test_runtime_kind_still_detects_colab_without_kaggle_signal():
+    env = {"COLAB_RELEASE_TAG": "release"}
+
+    assert bootstrap._runtime_kind(env, path_exists=lambda path: False) == "colab"
+
+
+def test_runtime_kind_uses_content_path_as_colab_fallback():
+    def path_exists(path: Path) -> bool:
+        return path == Path("/content")
+
+    assert bootstrap._runtime_kind({}, path_exists=path_exists) == "colab"
+
+
 def test_wheel_manifest_detects_content_corruption(tmp_path):
     package_ref = "b" * 40
     wheel_dir = tmp_path / "wheels"
