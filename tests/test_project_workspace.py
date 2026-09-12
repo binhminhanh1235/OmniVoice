@@ -1,11 +1,14 @@
+import inspect
 from types import SimpleNamespace
 
+from omnivoice.cli.project_studio import _LANGUAGE_CHOICES
 from omnivoice.cli.project_workspace import (
     _chunk_target,
     _labels_for_ids,
     _project_summary,
     _section_ids,
     _section_labels,
+    build_project_workspace_demo,
 )
 
 
@@ -65,6 +68,14 @@ def test_project_summary_surfaces_saved_narration_setting():
     assert "1/2 chunks verified" in summary
     assert "Warm narrator/AUTO" in summary
     assert "Read titles **on**" in summary
+
+
+def test_unified_workspace_language_is_dropdown_with_english_first():
+    assert _LANGUAGE_CHOICES[0] == ("English", "en")
+    source = inspect.getsource(build_project_workspace_demo)
+    assert "language = gr.Dropdown(" in source
+    assert "choices=_LANGUAGE_CHOICES" in source
+    assert "language = gr.Textbox(" not in source
 
 
 def test_primary_launcher_imports_after_navigation_consolidation():
