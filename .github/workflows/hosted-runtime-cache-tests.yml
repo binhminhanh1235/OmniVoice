@@ -7,6 +7,7 @@ on:
       - "notebooks/hosted_runtime_bootstrap.py"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb"
       - "scripts/hosted_cache_acceptance.py"
       - "tests/test_runtime_cache.py"
       - "tests/test_hosted_runtime_bootstrap.py"
@@ -18,11 +19,13 @@ on:
       - "master"
       - "feat/persistent-hosted-runtime-cache"
       - "docs/production-acceptance-guides"
+      - "feat/kaggle-gradio-full-studio"
     paths:
       - "omnivoice/runtime_cache.py"
       - "notebooks/hosted_runtime_bootstrap.py"
       - "notebooks/OmniVoice_Project_Studio_Colab.ipynb"
       - "notebooks/OmniVoice_Project_Studio_Kaggle.ipynb"
+      - "notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb"
       - "scripts/hosted_cache_acceptance.py"
       - "tests/test_runtime_cache.py"
       - "tests/test_hosted_runtime_bootstrap.py"
@@ -59,6 +62,7 @@ jobs:
         run: |
           python -m json.tool notebooks/OmniVoice_Project_Studio_Colab.ipynb >/dev/null
           python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
+          python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb >/dev/null
 
       - name: Run cache safety acceptance tests
         run: |
