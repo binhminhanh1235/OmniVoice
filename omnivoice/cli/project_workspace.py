@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from omnivoice.cli.project_studio import _LANGUAGE_CHOICES
 from omnivoice.preview import ProjectPreviewGenerator
 
 
@@ -531,9 +532,13 @@ def build_project_workspace_demo(
                     choices=initial_variants,
                     value=initial_variant,
                 )
-                language = gr.Textbox(
+                language = gr.Dropdown(
                     label="Language",
+                    choices=_LANGUAGE_CHOICES,
                     value=initial_settings.get("language") or "en",
+                    allow_custom_value=False,
+                    interactive=True,
+                    info="English is first; select another supported language when needed.",
                 )
                 strict = gr.Checkbox(label="Exact mode", value=False)
             preview_button = gr.Button("Generate opening / middle / ending previews")
