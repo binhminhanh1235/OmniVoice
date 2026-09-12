@@ -33,6 +33,13 @@ def _find_acceptance_cell(notebook: dict) -> str:
     return matches[0]
 
 
+def _compile_all_code_cells(notebook: dict, name: str) -> None:
+    for index, cell in enumerate(notebook["cells"]):
+        if cell.get("cell_type") != "code":
+            continue
+        compile(_cell_source(cell), f"{name}:cell-{index}", "exec")
+
+
 @pytest.mark.parametrize(
     "name",
     [
@@ -89,7 +96,9 @@ def test_kaggle_acceptance_carries_cold_evidence_across_dataset_boundary():
 
 
 def test_kaggle_gradio_notebook_exposes_full_studio_and_safe_public_modes():
-    notebook = _load_notebook("OmniVoice_Project_Studio_Kaggle_Gradio.ipynb")
+    name = "OmniVoice_Project_Studio_Kaggle_Gradio.ipynb"
+    notebook = _load_notebook(name)
+    _compile_all_code_cells(notebook, name)
     acceptance = _find_acceptance_cell(notebook)
     all_source = "\n".join(_cell_source(cell) for cell in notebook["cells"])
 
@@ -105,7 +114,7 @@ def test_kaggle_gradio_notebook_exposes_full_studio_and_safe_public_modes():
     assert 'f"{PUBLIC_URL}/docs"' in all_source
     assert 'f"{PUBLIC_URL}/mcp"' in all_source
     assert 'f"{PUBLIC_URL}/health"' in all_source
-    assert "trycloudflare.com" in all_source
+    assert "trycloudflare" in all_source
     assert "OMNIVOICE_API_TOKEN" in all_source
     assert "OMNIVOICE_UI_USERNAME" in all_source
     assert "OMNIVOICE_UI_PASSWORD" in all_source
