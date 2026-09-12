@@ -113,6 +113,40 @@ def _public_endpoint(args):
     return configure_mcp_security_for_public_url(value)
 
 
+def _endpoint_lines(args, public) -> tuple[str, ...]:
+    """Return endpoint text that is safe to show even when logging is preconfigured."""
+
+    local_origin = f"http://{args.host}:{args.port}"
+    lines = [
+        f"Studio UI: {local_origin}/ui",
+        f"REST API: {local_origin}/api/v1",
+        f"MCP: {local_origin}/mcp",
+        f"OpenAPI: {local_origin}/docs",
+        f"Health: {local_origin}/health",
+    ]
+    if public is not None:
+        public_origin = public.url.rstrip("/")
+        lines.extend(
+            [
+                f"PUBLIC STUDIO UI: {public.ui_url}",
+                f"Public REST API: {public.api_url}",
+                f"Public MCP: {public.mcp_url}",
+                f"Public OpenAPI: {public_origin}/docs",
+                f"Public Health: {public.health_url}",
+            ]
+        )
+    return tuple(lines)
+
+
+def _announce_endpoints(args, public) -> None:
+    """Print clickable endpoint URLs directly, independent of notebook logging state."""
+
+    print("\nOmniVoice Studio endpoints", flush=True)
+    for line in _endpoint_lines(args, public):
+        print(line, flush=True)
+    print("", flush=True)
+
+
 def serve(args) -> int:
     import uvicorn
 
@@ -153,16 +187,10 @@ def serve(args) -> int:
         runtime=runtime,
         mount_ui=not args.no_ui,
     )
-    logger.info("Studio UI: http://%s:%s/ui", args.host, args.port)
-    logger.info("REST API: http://%s:%s/api/v1", args.host, args.port)
-    logger.info("MCP: http://%s:%s/mcp", args.host, args.port)
-    logger.info("OpenAPI: http://%s:%s/docs", args.host, args.port)
-    logger.info("Health: http://%s:%s/health", args.host, args.port)
-    if public is not None:
-        logger.info("Public UI: %s", public.ui_url)
-        logger.info("Public REST API: %s", public.api_url)
-        logger.info("Public MCP: %s", public.mcp_url)
-        logger.info("Public Health: %s", public.health_url)
+    endpoint_lines = _endpoint_lines(args, public)
+    for line in endpoint_lines:
+        logger.info("%s", line)
+    _announce_endpoints(args, public)
 
     if not args.tunnel:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
