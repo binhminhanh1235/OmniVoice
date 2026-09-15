@@ -7,7 +7,8 @@
 The catalog is intentionally derived from durable workspace files instead of a
 second database. Project chunk/beat/section audio, merged project audio,
 project previews, and standalone AI-native audio jobs all become discoverable
-through one stable schema.
+through one stable schema. Historical section snapshots are excluded so agents
+see only currently selected project artifacts.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import soundfile as sf
 
 
 class ArtifactCatalog:
-    """Discover generated WAV files below one Studio workspace."""
+    """Discover current generated WAV files below one Studio workspace."""
 
     def __init__(self, workspace: str | Path) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
@@ -111,6 +112,12 @@ class ArtifactCatalog:
         for path in sorted(project_root.rglob("*.wav")):
             if not path.is_file():
                 continue
+            relative = path.relative_to(project_root)
+            # Section Version History is recovery state, not a currently selected
+            # artifact. Exposing it would create duplicate chunk/section choices
+            # and could make an agent download stale audio after regeneration.
+            if "history" in relative.parts:
+                continue
             try:
                 kind, section_id, chunk_id = self._classify_project_path(
                     project_root,
@@ -151,7 +158,7 @@ class ArtifactCatalog:
         project_id: Optional[str] = None,
         kinds: Optional[Iterable[str]] = None,
     ) -> list[dict[str, Any]]:
-        """Return generated audio artifacts, optionally filtered by project/kind."""
+        """Return current generated audio, optionally filtered by project/kind."""
 
         if project_id is not None:
             items = self._project_artifacts(self._project_root(project_id))
