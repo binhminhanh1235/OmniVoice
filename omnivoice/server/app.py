@@ -12,14 +12,21 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
+from omnivoice.artifacts import ArtifactCatalog
 from omnivoice.auth import StudioAuthConfig, StudioBearerAuthMiddleware
 from omnivoice.mcp_server import (
     create_omnivoice_mcp_server,
     mcp_transport_security_from_env,
 )
 from omnivoice.runtime_workspace import RuntimeWorkspace
-from omnivoice.server.schemas import GenerateProjectRequest
+from omnivoice.server.schemas import (
+    GenerateAudioRequest,
+    GenerateProjectRequest,
+    PreviewAudioRequest,
+    RegenerateRequest,
+)
 from omnivoice.services.job_manager import JobEvent, StudioJobManager
+from omnivoice.services.job_wait import wait_for_job
 from omnivoice.services.studio_commands import StudioCommandService
 from omnivoice.services.studio_service import StudioService
 
@@ -64,7 +71,20 @@ def create_studio_app(
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
     commands = command_service or StudioCommandService(model, workspace)
-    jobs.register("generate_project", commands.generate_project_job)
+    artifacts = ArtifactCatalog(workspace)
+
+    # Custom command services used by tests/integrators may implement only a
+    # subset. The production StudioCommandService implements all five writers.
+    for kind, method_name in (
+        ("generate_audio", "generate_audio_job"),
+        ("generate_project", "generate_project_job"),
+        ("preview_audio", "preview_audio_job"),
+        ("regenerate_section", "regenerate_section_job"),
+        ("regenerate_chunk", "regenerate_chunk_job"),
+    ):
+        handler = getattr(commands, method_name, None)
+        if handler is not None:
+            jobs.register(kind, handler)
 
     mcp_server = None
     mcp_http_app = None
@@ -84,8 +104,6 @@ def create_studio_app(
             if mcp_server is None:
                 yield
             else:
-                # Mounted ASGI sub-app lifespans are not run by Starlette, so the
-                # unified Studio host owns the MCP session manager lifecycle.
                 async with mcp_server.session_manager.run():
                     yield
         finally:
@@ -93,10 +111,11 @@ def create_studio_app(
 
     app = FastAPI(
         title="OmniVoice Studio API",
-        version="0.6.0",
+        version="0.7.0",
         description=(
             "Unified OmniVoice Studio host with authenticated Gradio UI, REST/OpenAPI, "
-            "durable single-GPU jobs, live SSE progress, and Model Context Protocol tools."
+            "durable single-GPU jobs, live SSE progress, generated audio artifacts, "
+            "and Model Context Protocol tools."
         ),
         lifespan=lifespan,
     )
@@ -106,9 +125,48 @@ def create_studio_app(
     app.state.studio_service = service
     app.state.command_service = commands
     app.state.job_manager = jobs
+    app.state.artifact_catalog = artifacts
     app.state.omnivoice_model = model
     app.state.mcp_server = mcp_server
     app.state.auth_config = auth
+
+    def submit_job(
+        kind: str,
+        payload: dict[str, Any],
+        idempotency_key: Optional[str],
+    ):
+        try:
+            job = jobs.submit(
+                kind,
+                payload,
+                idempotency_key=(str(idempotency_key).strip() or None)
+                if idempotency_key is not None
+                else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        location = f"/api/v1/jobs/{job.id}"
+        return JSONResponse(
+            status_code=202,
+            headers={"Location": location},
+            content={
+                "job_id": job.id,
+                "kind": job.kind,
+                "status": job.status,
+                "location": location,
+                "wait": f"{location}/wait",
+                "events": f"{location}/stream",
+                "idempotency_key": job.idempotency_key,
+            },
+        )
+
+    def project_payload(project_id: str) -> dict[str, Any]:
+        try:
+            return service.get_project(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Project not found") from exc
 
     @app.get("/health", tags=["system"])
     def health():
@@ -134,12 +192,24 @@ def create_studio_app(
         payload["features"]["job_manager"] = True
         payload["features"]["async_generation"] = True
         payload["features"]["sse_job_stream"] = True
+        payload["features"]["audio_artifacts"] = True
+        payload["features"]["standalone_audio_generation"] = True
+        payload["features"]["preview_audio"] = True
+        payload["features"]["targeted_regeneration"] = True
         payload["features"]["mcp"] = mcp_server is not None
         payload["features"]["bearer_auth"] = auth.bearer_enabled
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
         payload["endpoints"]["job_stream"] = "/api/v1/jobs/{job_id}/stream"
-        payload["endpoints"]["generate_project"] = (
-            "/api/v1/projects/{project_id}/generate"
+        payload["endpoints"]["job_wait"] = "/api/v1/jobs/{job_id}/wait"
+        payload["endpoints"]["generate_audio"] = "/api/v1/audio/generate"
+        payload["endpoints"]["preview_audio"] = "/api/v1/audio/preview"
+        payload["endpoints"]["artifacts"] = "/api/v1/artifacts"
+        payload["endpoints"]["generate_project"] = "/api/v1/projects/{project_id}/generate"
+        payload["endpoints"]["regenerate_section"] = (
+            "/api/v1/projects/{project_id}/sections/{section_id}/regenerate"
+        )
+        payload["endpoints"]["regenerate_chunk"] = (
+            "/api/v1/projects/{project_id}/sections/{section_id}/chunks/{chunk_id}/regenerate"
         )
         payload["endpoints"]["mcp"] = "/mcp" if mcp_server is not None else None
         return payload
@@ -162,12 +232,29 @@ def create_studio_app(
 
     @app.get("/api/v1/projects/{project_id}", tags=["projects"])
     def get_project(project_id: str):
-        try:
-            return service.get_project(project_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Project not found") from exc
+        return project_payload(project_id)
+
+    @app.post("/api/v1/audio/generate", status_code=202, tags=["audio", "jobs"])
+    def generate_audio(
+        request: GenerateAudioRequest,
+        idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    ):
+        return submit_job(
+            "generate_audio",
+            request.model_dump(exclude_none=True),
+            idempotency_key,
+        )
+
+    @app.post("/api/v1/audio/preview", status_code=202, tags=["audio", "jobs"])
+    def preview_audio(
+        request: PreviewAudioRequest,
+        idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    ):
+        payload = request.model_dump(exclude_none=True)
+        if request.project_id:
+            project = project_payload(request.project_id)
+            payload["project_path"] = project["path"]
+        return submit_job("preview_audio", payload, idempotency_key)
 
     @app.post(
         "/api/v1/projects/{project_id}/generate",
@@ -183,36 +270,69 @@ def create_studio_app(
             description="Stable client key used to deduplicate retried submissions.",
         ),
     ):
+        project = project_payload(project_id)
+        payload = request.model_dump(exclude_none=True)
+        payload["project_id"] = project_id
+        payload["project_path"] = project["path"]
+        return submit_job("generate_project", payload, idempotency_key)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/sections/{section_id}/regenerate",
+        status_code=202,
+        tags=["projects", "jobs"],
+    )
+    def regenerate_section(
+        project_id: str,
+        section_id: str,
+        request: RegenerateRequest,
+        idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    ):
+        project = project_payload(project_id)
+        payload = request.model_dump(exclude_none=True)
+        payload.update(
+            {
+                "project_id": project_id,
+                "project_path": project["path"],
+                "section_id": section_id,
+            }
+        )
+        return submit_job("regenerate_section", payload, idempotency_key)
+
+    @app.post(
+        "/api/v1/projects/{project_id}/sections/{section_id}/chunks/{chunk_id}/regenerate",
+        status_code=202,
+        tags=["projects", "jobs"],
+    )
+    def regenerate_chunk(
+        project_id: str,
+        section_id: str,
+        chunk_id: str,
+        request: RegenerateRequest,
+        idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    ):
+        project = project_payload(project_id)
+        payload = request.model_dump(exclude_none=True)
+        payload.update(
+            {
+                "project_id": project_id,
+                "project_path": project["path"],
+                "section_id": section_id,
+                "chunk_id": chunk_id,
+            }
+        )
+        return submit_job("regenerate_chunk", payload, idempotency_key)
+
+    @app.get("/api/v1/artifacts", tags=["audio"])
+    def list_artifacts(
+        project_id: Optional[str] = Query(default=None),
+        kind: Optional[list[str]] = Query(default=None),
+    ):
         try:
-            project = service.get_project(project_id)
+            return {"items": artifacts.list(project_id=project_id, kinds=kind)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Project not found") from exc
-
-        payload = request.model_dump(exclude_none=True)
-        payload["project_id"] = project_id
-        payload["project_path"] = project["path"]
-        try:
-            job = jobs.submit(
-                "generate_project",
-                payload,
-                idempotency_key=idempotency_key,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        location = f"/api/v1/jobs/{job.id}"
-        return JSONResponse(
-            status_code=202,
-            headers={"Location": location},
-            content={
-                "job_id": job.id,
-                "status": job.status,
-                "location": location,
-                "idempotency_key": job.idempotency_key,
-            },
-        )
 
     @app.get("/api/v1/queue", tags=["queue"])
     def queue_summary():
@@ -229,12 +349,29 @@ def create_studio_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Job not found") from exc
 
+    @app.get("/api/v1/jobs/{job_id}/wait", tags=["jobs"])
+    def wait_job(
+        job_id: str,
+        timeout_seconds: float = Query(default=60.0, ge=0.0, le=600.0),
+        include_events: bool = Query(default=False),
+    ):
+        try:
+            job, timed_out = wait_for_job(
+                jobs,
+                job_id,
+                timeout_seconds=timeout_seconds,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Job not found") from exc
+        payload = _job_payload(job, include_events=include_events)
+        payload["timed_out"] = timed_out
+        payload["terminal"] = job.status in _TERMINAL_JOB_STATUSES
+        return payload
+
     @app.get("/api/v1/jobs/{job_id}/events", tags=["jobs"])
     def get_job_events(job_id: str, after: int = 0):
         try:
-            return {
-                "items": [asdict(event) for event in jobs.events_after(job_id, after)]
-            }
+            return {"items": [asdict(event) for event in jobs.events_after(job_id, after)]}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Job not found") from exc
 
@@ -272,7 +409,6 @@ def create_studio_app(
                     if job.status in _TERMINAL_JOB_STATUSES:
                         return
                     continue
-
                 if job.status in _TERMINAL_JOB_STATUSES:
                     return
                 yield ": keep-alive\n\n"
@@ -313,6 +449,7 @@ def create_studio_app(
         app.state.studio_service = service
         app.state.command_service = commands
         app.state.job_manager = jobs
+        app.state.artifact_catalog = artifacts
         app.state.omnivoice_model = model
         app.state.mcp_server = mcp_server
         app.state.auth_config = auth
