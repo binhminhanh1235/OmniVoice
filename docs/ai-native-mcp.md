@@ -29,38 +29,97 @@ omnivoice-studio serve \
   --port 8000
 ```
 
-## MCP tools v1
+## Priority generation tools
 
-Current task-oriented tools:
+The agent-facing generation surface is intentionally compact:
 
 ```text
-studio_status
-list_projects
-inspect_project
-queue_status
+generate_audio
 generate_project
 get_job
+wait_job
+list_artifacts
+preview_audio
+regenerate_section
+regenerate_chunk
 cancel_job
+```
+
+The server also keeps the read-only discovery helpers `studio_status`, `list_projects`, `inspect_project`, and `queue_status`.
+
+### One durable lifecycle
+
+Every GPU-bound generation mutation returns a `job_id` immediately. `generate_audio`, `generate_project`, `preview_audio`, `regenerate_section`, and `regenerate_chunk` all use the same persistent single-GPU worker.
+
+```text
+command
+   |
+ job_id
+   |
+wait_job
+   |
+list_artifacts
+```
+
+Prefer `wait_job` over repeated `get_job` polling. It waits on the Job Manager condition/event stream and returns when the job reaches `completed`, `failed`, or `cancelled`, or when the caller's timeout expires.
+
+### generate_audio
+
+Use `generate_audio` for a standalone WAV when a full Project Studio manifest is unnecessary. It supports saved voices, voice variants, language, style/instruct, speed, quality preset, and idempotent retry.
+
+Standalone output is stored under the Studio workspace:
+
+```text
+<workspace>/artifacts/audio/job_....wav
 ```
 
 ### generate_project
 
-`generate_project` is asynchronous. It submits a durable job and returns immediately:
+`generate_project` remains resumable and section-aware. It reuses saved project voice/language/quality settings unless explicit overrides are supplied.
 
-```json
-{
-  "job_id": "job_...",
-  "status": "queued",
-  "job_url": "/api/v1/jobs/job_...",
-  "events_url": "/api/v1/jobs/job_.../stream"
-}
+### preview_audio
+
+`preview_audio` has two modes:
+
+- direct text preview, written to `<workspace>/artifacts/previews/`;
+- non-destructive representative project previews using the existing opening/middle/ending preview engine.
+
+Preview generation never changes the project's selected final audio.
+
+### regenerate_section
+
+`regenerate_section` forces exactly one section through the established Project Studio generation path. Existing section history snapshot behavior remains active.
+
+### regenerate_chunk
+
+`regenerate_chunk` marks exactly one chunk for regeneration, then rebuilds only the required beat/section output using the existing chunk-resume controller.
+
+### list_artifacts
+
+`list_artifacts` discovers generated WAV files from durable workspace state instead of maintaining a second artifact database. Returned metadata includes:
+
+```text
+id
+kind
+project_id
+section_id
+chunk_id
+filename
+path
+relative_path
+size_bytes
+duration_seconds
+sample_rate
+channels
 ```
+
+Kinds currently include `generated_audio`, `preview_audio`, `chunk_audio`, `beat_audio`, `section_audio`, and `project_audio`.
+
+### Idempotency and cancellation
 
 Use a stable `idempotency_key` when retrying after a network timeout. Reusing the same key returns the existing job instead of duplicating GPU work.
 
-### Cancellation
-
-Cancellation is cooperative. It takes effect at a safe checkpoint rather than killing model inference mid-section.
+Cancellation is cooperative. It takes effect at a safe checkpoint rather than killing model inference mid-section or mid-chunk.
 
 ## MCP resources
 
@@ -71,27 +130,67 @@ omnivoice://projects/{project_id}
 omnivoice://queue
 ```
 
-## Recommended agent workflow
+## Recommended agent workflows
+
+Standalone audio:
 
 ```text
-list_projects(...)
-        |
-inspect_project(project_id)
-        |
-generate_project(..., idempotency_key=...)
+generate_audio(..., idempotency_key=...)
         |
       job_id
         |
-get_job(job_id)
+wait_job(job_id)
         |
-SSE /api/v1/jobs/{job_id}/stream
+list_artifacts(kinds=["generated_audio"])
 ```
+
+Long-form project:
+
+```text
+inspect_project(project_id)
+        |
+preview_audio(project_id=...)
+        |
+wait_job(job_id)
+        |
+generate_project(...)
+        |
+wait_job(job_id)
+        |
+list_artifacts(project_id=...)
+```
+
+Targeted repair:
+
+```text
+regenerate_chunk(project_id, section_id, chunk_id)
+        |
+wait_job(job_id)
+        |
+list_artifacts(project_id=..., kinds=["chunk_audio", "section_audio"])
+```
+
+## CLI parity
+
+The `omnivoice` umbrella CLI maps directly to the same REST/job contracts:
+
+```text
+omnivoice generate-audio
+omnivoice generate-project
+omnivoice get-job
+omnivoice wait-job
+omnivoice list-artifacts
+omnivoice preview-audio
+omnivoice regenerate-section
+omnivoice regenerate-chunk
+omnivoice cancel-job
+```
+
+Set `OMNIVOICE_STUDIO_URL` and optionally `OMNIVOICE_API_TOKEN` for remote Studio instances.
 
 ## Authentication
 
 Bearer auth and scopes are implemented.
-
-Example:
 
 ```bash
 export OMNIVOICE_API_TOKEN="strong-secret"
@@ -108,8 +207,6 @@ omnivoice:mcp
 omnivoice:admin
 ```
 
-A valid token with insufficient scope receives a different authorization failure from an invalid/missing token.
-
 ## Transport security
 
 The MCP transport supports DNS-rebinding protection.
@@ -121,56 +218,10 @@ export OMNIVOICE_MCP_ALLOWED_HOSTS="omnivoice.example.com,omnivoice.example.com:
 export OMNIVOICE_MCP_ALLOWED_ORIGINS="https://omnivoice.example.com"
 ```
 
-When `--public-url` is used, Studio configures the public-host allowlist unless explicit values already exist.
+Only use `OMNIVOICE_MCP_TRUST_PROXY=1` when a trusted reverse proxy/tunnel is intentionally the security boundary.
 
-Only use:
+## Still planned
 
-```bash
-export OMNIVOICE_MCP_TRUST_PROXY=1
-```
-
-when a trusted reverse proxy/tunnel is intentionally the security boundary.
-
-## Stable public MCP URL
-
-Named Cloudflare Tunnel support is implemented, so clients can keep a stable URL:
-
-```text
-https://omnivoice.example.com/mcp
-```
-
-Example environment:
-
-```bash
-export OMNIVOICE_API_TOKEN="strong-secret"
-export OMNIVOICE_API_TOKEN_SCOPES="omnivoice:read,omnivoice:generate,omnivoice:queue,omnivoice:mcp"
-export CLOUDFLARE_TUNNEL_TOKEN="..."
-export OMNIVOICE_PUBLIC_URL="https://omnivoice.example.com"
-```
-
-Launch:
-
-```bash
-omnivoice-studio serve \
-  --workspace ./OmniVoiceStudio \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --tunnel \
-  --public-url https://omnivoice.example.com
-```
-
-## What is still planned?
-
-The MCP foundation is production-merged, but the command surface is intentionally small.
-
-Planned after REST command contracts stabilize:
-
-- preview tool;
-- queue mutation tools;
-- regenerate chunk tool;
-- merge/export tool;
-- Universal OmniVoice Skill;
-- ChatGPT / Claude Code / generic MCP examples;
-- optional control plane + worker registry.
+The next useful command layers are download/range-resume, merge/export packaging, queue mutation tools, the Universal OmniVoice Skill, client examples, and an optional persistent control plane/worker registry.
 
 See [project-studio-roadmap.md](project-studio-roadmap.md) for canonical status.

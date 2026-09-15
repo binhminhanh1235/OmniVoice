@@ -64,6 +64,7 @@ lora = [
 ]
 
 [project.scripts]
+omnivoice = "omnivoice.cli.ai_tools:main"
 omnivoice-infer = "omnivoice.cli.infer:main"
 omnivoice-infer-batch = "omnivoice.cli.infer_batch:main"
 omnivoice-demo = "omnivoice.cli.demo_robust:main"

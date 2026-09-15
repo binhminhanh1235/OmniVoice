@@ -11,6 +11,8 @@ on:
       - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
       - "omnivoice/section_export.py"
+      - "omnivoice/artifacts.py"
+      - "omnivoice/auth.py"
       - "omnivoice/services/**"
       - "omnivoice/server/**"
       - "omnivoice/mcp_server.py"
@@ -29,6 +31,7 @@ on:
       - "omnivoice/preview.py"
       - "omnivoice/voice_library.py"
       - "omnivoice/style_bank.py"
+      - "omnivoice/cli/ai_tools.py"
       - "omnivoice/cli/benchmark.py"
       - "omnivoice/cli/data_management_ui.py"
       - "omnivoice/cli/demo_robust.py"
@@ -70,6 +73,12 @@ on:
       - "docs/voice-doctor.md"
       - "docs/voice-stability-score.md"
       - "docs/auto-reference-segment.md"
+      - "tests/test_ai_native_auth.py"
+      - "tests/test_ai_native_commands.py"
+      - "tests/test_ai_native_mcp_tools.py"
+      - "tests/test_ai_native_server_tools.py"
+      - "tests/test_ai_tools_cli.py"
+      - "tests/test_artifacts.py"
       - "tests/test_benchmark.py"
       - "tests/test_adaptive_quality.py"
       - "tests/test_data_management.py"
@@ -177,9 +186,15 @@ jobs:
           python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle.ipynb >/dev/null
           python -m json.tool notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb >/dev/null
 
-      - name: Run robust long-form and project tests
+      - name: Run robust long-form, project, and AI-native tool tests
         run: |
           pytest -q \
+            tests/test_ai_native_auth.py \
+            tests/test_ai_native_commands.py \
+            tests/test_ai_native_mcp_tools.py \
+            tests/test_ai_native_server_tools.py \
+            tests/test_ai_tools_cli.py \
+            tests/test_artifacts.py \
             tests/test_benchmark.py \
             tests/test_adaptive_quality.py \
             tests/test_data_management.py \

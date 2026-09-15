@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class GenerateProjectRequest(BaseModel):
@@ -21,3 +21,48 @@ class GenerateProjectRequest(BaseModel):
         default=None,
         description="SAFE, BALANCED or FAST. Omit to use saved project/workspace policy.",
     )
+
+
+class GenerateAudioRequest(BaseModel):
+    """Submit one standalone audio generation without creating a project."""
+
+    text: str = Field(min_length=1)
+    voice_name: Optional[str] = None
+    voice_variant: Optional[str] = None
+    language: Optional[str] = "en"
+    instruct: Optional[str] = None
+    speed: Optional[float] = Field(default=None, gt=0)
+    quality_preset: Optional[str] = None
+    style: Optional[str] = "DEFAULT"
+
+
+class PreviewAudioRequest(BaseModel):
+    """Submit direct-text or project representative preview generation."""
+
+    text: Optional[str] = None
+    project_id: Optional[str] = None
+    voice_name: Optional[str] = None
+    voice_variant: Optional[str] = None
+    language: Optional[str] = None
+    labels: Optional[list[str]] = None
+    instruct: Optional[str] = None
+    speed: Optional[float] = Field(default=None, gt=0)
+    quality_preset: Optional[str] = None
+    strict: bool = False
+    style: Optional[str] = "DEFAULT"
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if not str(self.text or "").strip() and not str(self.project_id or "").strip():
+            raise ValueError("preview requires text or project_id")
+        return self
+
+
+class RegenerateRequest(BaseModel):
+    """Shared voice/quality overrides for section or chunk regeneration."""
+
+    voice_name: Optional[str] = None
+    voice_variant: Optional[str] = None
+    language: Optional[str] = None
+    strict: bool = False
+    quality_preset: Optional[str] = None
