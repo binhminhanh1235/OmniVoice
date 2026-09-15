@@ -129,7 +129,11 @@ def required_scope_for_request(method: str, path: str) -> Optional[str]:
         return READ_SCOPE
     if path.startswith("/api/v1/queue"):
         return QUEUE_SCOPE
-    if path.startswith("/api/v1/projects/") and path.endswith("/generate"):
+    if path in {"/api/v1/audio/generate", "/api/v1/audio/preview"}:
+        return GENERATE_SCOPE
+    if path.startswith("/api/v1/projects/") and (
+        path.endswith("/generate") or path.endswith("/regenerate")
+    ):
         return GENERATE_SCOPE
     if path.startswith("/api/v1/jobs/") and path.endswith("/cancel"):
         return GENERATE_SCOPE
