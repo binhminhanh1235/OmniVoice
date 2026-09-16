@@ -2,18 +2,19 @@
 # Copyright 2026 OmniVoice contributors
 # Licensed under the Apache License, Version 2.0
 
-"""Durable hosted-runtime persistence for the complete Studio workspace.
+"""Hosted-runtime persistence policy for the complete Studio workspace.
 
-Generation stays on the hosted runtime's local SSD. Durable state is mirrored
-out-of-band so Voice Library entries, projects, queue/jobs, settings and audio
-artifacts survive a discarded Colab/Kaggle session.
+Colab keeps the existing local-first + mounted Google Drive mirror because the
+Drive mount is native to the notebook runtime.
 
-Colab uses an already-mounted Google Drive directory. Kaggle can use Google
-Drive through rclone when three one-time Kaggle Secrets are configured:
-``OMNIVOICE_GDRIVE_CLIENT_ID``, ``OMNIVOICE_GDRIVE_CLIENT_SECRET`` and
-``OMNIVOICE_GDRIVE_TOKEN_JSON``. Credentials are copied only into the existing
-runtime-only rclone credential store; they are never written into the Studio
-workspace or repository.
+Kaggle deliberately does not run an automatic Google Drive mirror. User state
+stays directly under ``/kaggle/working/OmniVoiceStudio`` and is carried between
+sessions/VMs by Kaggle's ``Session Persistence -> Files only`` option. Heavy
+startup/model caches live outside ``/kaggle/working`` so the Files-only snapshot
+stays focused on saved voices, projects, queue/jobs, settings and artifacts.
+
+Manual Google Drive backup remains available from Studio's Storage & Backup UI;
+it is not part of the Kaggle startup path.
 """
 
 from __future__ import annotations
@@ -28,25 +29,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from omnivoice.data_management import (
-    _normalise_destination,
-    _run_rclone,
-    drive_connected,
-    rclone_available,
-    save_drive_connection,
-)
-from omnivoice.runtime_rclone import install_rclone_runtime
 from omnivoice.runtime_workspace import RuntimeWorkspace
 
 logger = logging.getLogger(__name__)
 
 PERSISTENCE_INTERVAL_ENV = "OMNIVOICE_PERSISTENCE_INTERVAL_SECONDS"
 PERSISTENCE_MODE_ENV = "OMNIVOICE_PERSISTENCE_MODE"
-GDRIVE_CLIENT_ID_ENV = "OMNIVOICE_GDRIVE_CLIENT_ID"
-GDRIVE_CLIENT_SECRET_ENV = "OMNIVOICE_GDRIVE_CLIENT_SECRET"
-GDRIVE_TOKEN_ENV = "OMNIVOICE_GDRIVE_TOKEN_JSON"
-GDRIVE_DESTINATION_ENV = "OMNIVOICE_GDRIVE_DESTINATION"
-DEFAULT_DESTINATION = "OmniVoiceStudio"
 DEFAULT_INTERVAL_SECONDS = 15.0
 _MIRROR_THREAD_NAME = "omnivoice-drive-mirror"
 _REBASE_JSON_FILES = ("project-queue.json", "jobs.json")
@@ -67,21 +55,6 @@ def _is_excluded(relative: Path) -> bool:
     if relative.parts[0] in _EXCLUDED_TOP_LEVEL:
         return True
     return any(part.endswith(".tmp") or part.startswith(".nfs") for part in relative.parts)
-
-
-def _rclone_exclude_args() -> list[str]:
-    patterns = [
-        ".startup-cache/**",
-        ".startup-evidence/**",
-        ".runtime-cache.json",
-        "startup-cache-evidence.json",
-        "**/*.tmp",
-        "**/.nfs*",
-    ]
-    args: list[str] = []
-    for pattern in patterns:
-        args.extend(["--exclude", pattern])
-    return args
 
 
 def _copy_workspace_tree(source: Path, destination: Path, *, delete: bool) -> None:
@@ -135,7 +108,7 @@ def _copy_workspace_tree(source: Path, destination: Path, *, delete: bool) -> No
 
 
 def _rebase_hosted_path(value: str, workspace: Path) -> str:
-    """Rebase a default hosted workspace path after moving Kaggle <-> Colab."""
+    """Rebase a default hosted workspace path after moving Colab runtime roots."""
 
     if not value.startswith("/"):
         return value
@@ -175,7 +148,7 @@ def _rebase_payload(value: Any, workspace: Path) -> tuple[Any, int]:
 
 
 def _rebase_restored_runtime_state(workspace: Path) -> int:
-    """Make queue/job absolute paths portable across hosted runtime roots."""
+    """Make restored queue/job absolute paths portable across hosted roots."""
 
     total = 0
     for filename in _REBASE_JSON_FILES:
@@ -203,57 +176,12 @@ def _thread_running(name: str = _MIRROR_THREAD_NAME) -> bool:
     return any(thread.name == name and thread.is_alive() for thread in threading.enumerate())
 
 
-def _read_kaggle_secret(name: str) -> Optional[str]:
+def _under_kaggle_working(path: Path) -> bool:
     try:
-        from kaggle_secrets import UserSecretsClient
-
-        value = UserSecretsClient().get_secret(name)
-    except Exception:
-        return None
-    cleaned = str(value or "").strip()
-    return cleaned or None
-
-
-def _value_from_environment_or_kaggle_secret(
-    name: str,
-    environ: Mapping[str, str],
-) -> Optional[str]:
-    value = str(environ.get(name, "") or "").strip()
-    return value or _read_kaggle_secret(name)
-
-
-def configure_kaggle_drive_connection(
-    workspace: str | Path,
-    *,
-    environ: Optional[Mapping[str, str]] = None,
-) -> tuple[bool, str]:
-    """Load one-time Kaggle Secrets into the runtime-only Drive connection."""
-
-    if drive_connected(workspace):
-        return True, "Google Drive connection is already available in this runtime."
-
-    env = os.environ if environ is None else environ
-    client_id = _value_from_environment_or_kaggle_secret(GDRIVE_CLIENT_ID_ENV, env)
-    client_secret = _value_from_environment_or_kaggle_secret(GDRIVE_CLIENT_SECRET_ENV, env)
-    token_json = _value_from_environment_or_kaggle_secret(GDRIVE_TOKEN_ENV, env)
-    if not client_id or not client_secret or not token_json:
-        return (
-            False,
-            "Kaggle local storage is ephemeral. Configure Kaggle Secrets "
-            f"{GDRIVE_CLIENT_ID_ENV}, {GDRIVE_CLIENT_SECRET_ENV}, and {GDRIVE_TOKEN_ENV} "
-            "once to enable automatic full-workspace restore and backup.",
-        )
-
-    try:
-        save_drive_connection(
-            workspace,
-            client_id=client_id,
-            client_secret=client_secret,
-            token_json=token_json,
-        )
-    except Exception as exc:
-        return False, f"Could not load Kaggle Google Drive persistence secrets: {exc}"
-    return True, "Loaded Google Drive persistence credentials from Kaggle Secrets."
+        path.resolve().relative_to(Path("/kaggle/working").resolve())
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 @dataclass
@@ -261,7 +189,6 @@ class HostedWorkspacePersistence:
     runtime: RuntimeWorkspace
     workspace: Path
     backend: str
-    destination: str = DEFAULT_DESTINATION
     persistent_root: Optional[Path] = None
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
     available: bool = True
@@ -272,34 +199,16 @@ class HostedWorkspacePersistence:
     _sync_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
-    @property
-    def remote_path(self) -> str:
-        return f"omnivoice_drive:{self.destination}"
-
     def restore(self) -> None:
         if not self.available or self.externally_managed:
             return
         self.workspace.mkdir(parents=True, exist_ok=True)
         with self._sync_lock:
-            if self.backend == "colab-drive":
-                if self.persistent_root is None:
-                    raise RuntimeError("Colab persistence root is missing")
-                _copy_workspace_tree(self.persistent_root, self.workspace, delete=False)
-            elif self.backend == "google-drive-rclone":
-                _run_rclone(self.workspace, ["mkdir", self.remote_path])
-                _run_rclone(
-                    self.workspace,
-                    [
-                        "copy",
-                        self.remote_path,
-                        str(self.workspace),
-                        "--create-empty-src-dirs",
-                        *_rclone_exclude_args(),
-                    ],
-                )
-            else:
+            if self.backend != "colab-drive":
                 raise RuntimeError(f"Unsupported persistence backend: {self.backend}")
-
+            if self.persistent_root is None:
+                raise RuntimeError("Colab persistence root is missing")
+            _copy_workspace_tree(self.persistent_root, self.workspace, delete=False)
             rebased = _rebase_restored_runtime_state(self.workspace)
             if rebased:
                 self.message += f" Rebased {rebased} restored queue/job path value(s) to this runtime."
@@ -309,32 +218,17 @@ class HostedWorkspacePersistence:
             return
         self.workspace.mkdir(parents=True, exist_ok=True)
         with self._sync_lock:
-            if self.backend == "colab-drive":
-                if self.persistent_root is None:
-                    raise RuntimeError("Colab persistence root is missing")
-                _copy_workspace_tree(self.workspace, self.persistent_root, delete=True)
-                return
-            if self.backend == "google-drive-rclone":
-                _run_rclone(
-                    self.workspace,
-                    [
-                        "sync",
-                        str(self.workspace),
-                        self.remote_path,
-                        "--create-empty-src-dirs",
-                        *_rclone_exclude_args(),
-                    ],
-                )
-                return
-            raise RuntimeError(f"Unsupported persistence backend: {self.backend}")
+            if self.backend != "colab-drive":
+                raise RuntimeError(f"Unsupported persistence backend: {self.backend}")
+            if self.persistent_root is None:
+                raise RuntimeError("Colab persistence root is missing")
+            _copy_workspace_tree(self.workspace, self.persistent_root, delete=True)
 
     def _loop(self) -> None:
         while not self._stop.wait(self.interval_seconds):
             try:
                 self.sync_now()
             except Exception as exc:
-                # Persistence failure must not crash TTS generation. Keep retrying
-                # and surface a warning without printing any credential material.
                 logger.warning(
                     "Hosted workspace background sync failed; retrying next interval: %s: %s",
                     type(exc).__name__,
@@ -360,8 +254,6 @@ class HostedWorkspacePersistence:
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=min(max(self.interval_seconds, 1.0), 5.0))
         if self.available and not self.externally_managed:
-            # Do the final sync before marking closed; sync_now intentionally
-            # refuses work after _closed becomes true.
             self.sync_now()
         self._closed = True
 
@@ -372,7 +264,7 @@ def prepare_hosted_workspace_persistence(
     *,
     environ: Optional[Mapping[str, str]] = None,
 ) -> HostedWorkspacePersistence:
-    """Restore durable hosted state and start automatic mirroring when possible."""
+    """Prepare the platform-native Studio persistence contract."""
 
     env = os.environ if environ is None else environ
     workspace_path = Path(workspace).expanduser()
@@ -437,45 +329,29 @@ def prepare_hosted_workspace_persistence(
         )
 
     if runtime.environment == "kaggle":
-        connected, detail = configure_kaggle_drive_connection(workspace_path, environ=env)
-        if not connected:
-            return HostedWorkspacePersistence(
-                runtime=runtime,
-                workspace=workspace_path,
-                backend="none",
-                interval_seconds=interval,
-                available=False,
-                message=detail,
+        workspace_path.mkdir(parents=True, exist_ok=True)
+        if _under_kaggle_working(workspace_path):
+            message = (
+                "Using Kaggle /kaggle/working directly for Studio state. Enable Kaggle "
+                "Session Persistence -> Files only to keep saved voices, projects, queue/jobs, "
+                "settings and artifacts across sessions/VMs. Heavy startup/model caches are kept "
+                "under /tmp, so they are not part of the Files-only snapshot. Automatic Google "
+                "Drive mirroring is disabled; Storage & Backup remains available for manual backup."
             )
-        if not rclone_available():
-            try:
-                install_rclone_runtime()
-            except Exception as exc:
-                return HostedWorkspacePersistence(
-                    runtime=runtime,
-                    workspace=workspace_path,
-                    backend="none",
-                    interval_seconds=interval,
-                    available=False,
-                    message=f"Google Drive persistence is configured but rclone install failed: {exc}",
-                )
-        destination = _normalise_destination(
-            str(env.get(GDRIVE_DESTINATION_ENV, DEFAULT_DESTINATION) or DEFAULT_DESTINATION)
-        )
-        session = HostedWorkspacePersistence(
+        else:
+            message = (
+                f"Kaggle custom workspace {workspace_path} is outside /kaggle/working and will not "
+                "be carried by Session Persistence -> Files only. Move OMNIVOICE_STUDIO_HOME under "
+                "/kaggle/working to persist saved voices and projects without external storage."
+            )
+        return HostedWorkspacePersistence(
             runtime=runtime,
             workspace=workspace_path,
-            backend="google-drive-rclone",
-            destination=destination,
+            backend="kaggle-files",
             interval_seconds=interval,
-            message=(
-                f"Automatic Kaggle full-workspace persistence enabled at Google Drive/{destination}. "
-                "Saved voices, projects, queue/jobs, settings and artifacts will be restored and mirrored."
-            ),
+            available=False,
+            message=message,
         )
-        session.restore()
-        session.start()
-        return session
 
     return HostedWorkspacePersistence(
         runtime=runtime,
