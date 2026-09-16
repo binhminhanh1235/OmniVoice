@@ -46,6 +46,16 @@ class ArtifactCatalog:
         digest = hashlib.sha256(relative_path.encode("utf-8")).hexdigest()[:16]
         return f"art_{digest}"
 
+    @staticmethod
+    def _validate_artifact_id(artifact_id: str) -> str:
+        value = str(artifact_id or "").strip()
+        if len(value) != 20 or not value.startswith("art_"):
+            raise ValueError("Invalid artifact id")
+        digest = value[4:]
+        if any(character not in "0123456789abcdef" for character in digest.lower()):
+            raise ValueError("Invalid artifact id")
+        return value.lower()
+
     def _classify_project_path(
         self,
         project_root: Path,
@@ -177,3 +187,19 @@ class ArtifactCatalog:
 
         items.sort(key=lambda item: (item["project_id"] or "", item["relative_path"]))
         return items
+
+    def get(self, artifact_id: str) -> dict[str, Any]:
+        """Resolve one currently selected catalog artifact by opaque id."""
+
+        target = self._validate_artifact_id(artifact_id)
+        matches = [item for item in self.list() if str(item["id"]).lower() == target]
+        if not matches:
+            raise KeyError(target)
+        if len(matches) != 1:
+            raise RuntimeError("Artifact id collision")
+
+        item = matches[0]
+        resolved = Path(item["path"]).expanduser().resolve()
+        if not resolved.is_file() or not resolved.is_relative_to(self.workspace):
+            raise KeyError(target)
+        return item
