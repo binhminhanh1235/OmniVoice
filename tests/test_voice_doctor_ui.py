@@ -1,8 +1,11 @@
+import inspect
+
 import numpy as np
 import soundfile as sf
 import torch
 
 from omnivoice import VoiceClonePrompt
+from omnivoice.cli.standalone_audio_ui import standalone_audio_payload
 from omnivoice.cli.voice_doctor_ui import (
     build_voice_doctor_demo,
     save_voice_reference,
@@ -97,3 +100,36 @@ def test_low_quality_reference_requires_explicit_override(tmp_path):
         raise AssertionError("Expected a low-quality reference to be blocked")
 
     assert model.calls == []
+
+
+def test_quick_audio_payload_is_project_independent_and_normalized():
+    payload = standalone_audio_payload(
+        "  A standalone paragraph.  ",
+        voice_name="Narrator",
+        voice_variant="warm",
+        language="en",
+        instruct=" Calm and clear. ",
+        speed=0.95,
+        quality_preset="balanced",
+    )
+
+    assert payload == {
+        "text": "A standalone paragraph.",
+        "voice_name": "Narrator",
+        "voice_variant": "WARM",
+        "language": "en",
+        "style": "DEFAULT",
+        "instruct": "Calm and clear.",
+        "speed": 0.95,
+        "quality_preset": "BALANCED",
+    }
+    assert "project" not in " ".join(payload.keys()).lower()
+
+
+def test_primary_studio_exposes_quick_audio_as_top_level_tab():
+    from omnivoice.cli import project_studio_voice_doctor as launcher
+
+    source = inspect.getsource(launcher.build_demo)
+    assert "build_standalone_audio_demo" in source
+    assert '"1. Quick Audio"' in source
+    assert source.index('"1. Quick Audio"') < source.index('"2. Projects"')
