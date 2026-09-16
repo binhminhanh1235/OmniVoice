@@ -4,6 +4,7 @@ from omnivoice.auth import GENERATE_SCOPE, READ_SCOPE, required_scope_for_reques
 def test_ai_native_generation_routes_use_generate_scope():
     assert required_scope_for_request("POST", "/api/v1/audio/generate") == GENERATE_SCOPE
     assert required_scope_for_request("POST", "/api/v1/audio/preview") == GENERATE_SCOPE
+    assert required_scope_for_request("POST", "/api/v1/projects/import") == GENERATE_SCOPE
     assert (
         required_scope_for_request(
             "POST",
