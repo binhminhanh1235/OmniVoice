@@ -43,13 +43,14 @@ One process can expose:
 ```text
 /ui                         Gradio Studio
 /api/v1                     REST / OpenAPI
+/api/v1/projects/import     Native Markdown project import
 /api/v1/jobs/{id}/stream    Server-Sent Events
 /mcp                        Streamable HTTP MCP
 /health                     Health
 /docs                       OpenAPI docs
 ```
 
-Production foundations include persistent GPU jobs, resumable async generation, idempotency keys, cooperative cancellation, durable events and SSE replay, task-oriented MCP tools, Cloudflare named-tunnel support, bearer scopes for machine APIs, and optional Basic Auth for the UI.
+Production foundations include persistent GPU jobs, resumable async generation, idempotency keys, cooperative cancellation, durable events and SSE replay, task-oriented MCP tools, Cloudflare named-tunnel support, bearer scopes for machine APIs, synchronous atomic project import, and optional Basic Auth for the UI.
 
 ### Hosted-runtime performance
 
@@ -83,6 +84,7 @@ No hosted speed number is claimed without a real Colab/Kaggle cold/warm run.
 | MCP server | Merged |
 | Stable named tunnel | Merged |
 | API scopes / bearer auth | Merged |
+| Native Markdown project import API | Implemented / awaiting merge verification |
 | Benchmark framework | Merged |
 | Persistent Colab/Kaggle startup cache | **Merged / Verified** |
 | Lazy CPU ASR startup | **Merged / Verified** |
@@ -309,9 +311,40 @@ prompt.save("my_voice.pt")
 
 Run a command with `--help` for its current arguments.
 
-## REST jobs and MCP
+## REST project import, jobs and MCP
 
-Submit project generation asynchronously, then track the durable job ID through REST/SSE or MCP. Initial task-oriented MCP tools include:
+External orchestrators such as `video-prepare` can create a Studio project from native OmniVoice Markdown without going through Gradio:
+
+```bash
+curl -X POST "$OMNIVOICE_STUDIO_URL/api/v1/projects/import" \
+  -H "Authorization: Bearer $OMNIVOICE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "demo-video",
+    "script": "# Demo\n\n## S01 — 0:00–0:20\n\n[WARM] Hello world.",
+    "speak_section_titles": false
+  }'
+```
+
+A new import returns `201 Created`. Retrying the same project/source/options returns `200 OK` with `created: false`; a different source for the same ID returns `409 Conflict` without overwriting existing project files or generated audio. Import is synchronous and never creates a fake GPU job.
+
+Then submit generation through the existing durable job flow:
+
+```bash
+curl -X POST \
+  "$OMNIVOICE_STUDIO_URL/api/v1/projects/demo-video/generate" \
+  -H "Authorization: Bearer $OMNIVOICE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "voice_name": "Narrator",
+    "voice_variant": "AUTO",
+    "language": "en",
+    "quality_preset": "BALANCED",
+    "resume": true
+  }'
+```
+
+Initial task-oriented MCP tools include:
 
 ```text
 studio_status
@@ -323,7 +356,7 @@ get_job
 cancel_job
 ```
 
-Generation returns a durable `job_id` instead of keeping one agent call open for the entire render.
+Generation returns a durable `job_id` instead of keeping one agent call open for the entire render. See [docs/project-import-api.md](docs/project-import-api.md) for the full import contract.
 
 ## Stable public hosting
 
@@ -363,6 +396,7 @@ The benchmark framework reports model load time, generated audio duration, RTF, 
 - [Project Studio roadmap](docs/project-studio-roadmap.md)
 - [Project Studio details](docs/project-studio.md)
 - [AI-native foundation](docs/ai-native-foundation.md)
+- [Native project import API](docs/project-import-api.md)
 - [SSE](docs/ai-native-sse.md)
 - [MCP](docs/ai-native-mcp.md)
 - [Stable tunnel](docs/stable-tunnel.md)
