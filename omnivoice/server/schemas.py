@@ -8,6 +8,16 @@ from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 
 
+class ImportProjectRequest(BaseModel):
+    """Synchronously import one native OmniVoice Markdown narration project."""
+
+    project_id: str
+    script: str
+    speak_section_titles: bool = False
+    max_chunk_words: int = Field(default=24, ge=4)
+    max_chunk_chars: int = Field(default=220, ge=40)
+
+
 class GenerateProjectRequest(BaseModel):
     """Submit resumable project/section generation to the GPU job queue."""
 
