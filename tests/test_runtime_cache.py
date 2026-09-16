@@ -45,7 +45,7 @@ def test_colab_cache_uses_local_ssd_and_drive_persistence():
     assert layout.persist_root == layout.source_root
 
 
-def test_kaggle_cache_restores_attached_dataset_and_exports_to_working():
+def test_kaggle_cache_restores_attached_dataset_but_keeps_hot_cache_out_of_working():
     layout = detect_runtime_cache(
         environ={"KAGGLE_KERNEL_RUN_TYPE": "Interactive"},
         path_exists=fake_exists(
@@ -56,9 +56,10 @@ def test_kaggle_cache_restores_attached_dataset_and_exports_to_working():
     )
 
     assert layout.environment == "kaggle"
-    assert layout.local_root == Path("/kaggle/working/.cache/omnivoice")
+    assert layout.local_root == Path("/tmp/omnivoice/cache")
     assert layout.source_root == Path("/kaggle/input/omnivoice-startup-cache")
-    assert layout.persist_root == Path("/kaggle/working/OmniVoiceStartupCache")
+    assert layout.persist_root == layout.local_root
+    assert not str(layout.local_root).startswith("/kaggle/working")
 
 
 def test_environment_overrides_cache_roots():
@@ -133,6 +134,28 @@ def test_persist_then_restore_compatible_cache(tmp_path):
         b"model-cache"
     )
     assert (second.local_namespace / "whisper" / "asr.bin").read_bytes() == b"asr-cache"
+
+
+def test_kaggle_in_place_cache_persist_marks_ready_without_copying_or_deleting(tmp_path):
+    fp = fingerprint()
+    root = tmp_path / "runtime-cache"
+    layout = RuntimeCacheLayout(
+        environment="kaggle",
+        local_root=root,
+        persist_root=root,
+    )
+    prepared = prepare_runtime_cache(layout, fp)
+    payload = prepared.local_namespace / "huggingface" / "model.bin"
+    payload.write_bytes(b"model-cache")
+
+    target = persist_runtime_cache(prepared)
+
+    assert target == prepared.local_namespace
+    assert payload.read_bytes() == b"model-cache"
+    metadata = json.loads((target / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["state"] == "ready"
+    assert metadata["inventory"]["huggingface"] == {"files": 1, "bytes": 11}
+    assert metadata["reason"] == "runtime-local cache marked ready in place"
 
 
 def test_package_revision_reuses_compatible_resource_cache(tmp_path):

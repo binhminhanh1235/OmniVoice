@@ -13,7 +13,7 @@ def fake_exists(*existing: str):
     return lambda path: str(Path(path)) in resolved
 
 
-def test_kaggle_env_uses_local_working_ssd():
+def test_kaggle_env_uses_files_persistable_working_workspace():
     info = detect_runtime_workspace(
         environ={"KAGGLE_KERNEL_RUN_TYPE": "Interactive"},
         path_exists=fake_exists("/kaggle/working", "/kaggle/input"),
@@ -23,8 +23,13 @@ def test_kaggle_env_uses_local_working_ssd():
     assert info.environment == "kaggle"
     assert info.root == Path("/kaggle/working/OmniVoiceStudio")
     assert info.input_root == Path("/kaggle/input")
+    # OmniVoice cannot inspect the notebook's Session Persistence toggle, so
+    # the runtime remains conservatively marked ephemeral while exposing the
+    # Files-only opt-in contract explicitly.
     assert info.ephemeral is True
-    assert info.persistence_backend == "none"
+    assert info.persistence_backend == "kaggle-files-opt-in"
+    assert any("Files only" in note for note in info.notes)
+    assert any("Heavy startup/model caches" in note for note in info.notes)
 
 
 def test_kaggle_path_detection_works_without_env_vars():
@@ -35,7 +40,7 @@ def test_kaggle_path_detection_works_without_env_vars():
     assert environment == "kaggle"
 
 
-def test_explicit_workspace_override_wins_on_kaggle():
+def test_explicit_workspace_override_under_working_keeps_files_persistence_contract():
     info = detect_runtime_workspace(
         environ={
             "KAGGLE_KERNEL_RUN_TYPE": "Interactive",
@@ -46,6 +51,20 @@ def test_explicit_workspace_override_wins_on_kaggle():
     assert info.environment == "kaggle"
     assert info.root == Path("/kaggle/working/custom-studio")
     assert info.ephemeral is True
+    assert info.persistence_backend == "kaggle-files-opt-in"
+
+
+def test_explicit_workspace_override_outside_working_is_not_files_persistable():
+    info = detect_runtime_workspace(
+        environ={
+            "KAGGLE_KERNEL_RUN_TYPE": "Interactive",
+            "OMNIVOICE_STUDIO_HOME": "/tmp/custom-studio",
+        },
+        path_exists=fake_exists("/kaggle/working"),
+    )
+    assert info.environment == "kaggle"
+    assert info.root == Path("/tmp/custom-studio")
+    assert info.persistence_backend == "none"
 
 
 def test_colab_keeps_existing_mounted_drive_behavior():
@@ -76,7 +95,7 @@ def test_ensure_runtime_workspace_creates_only_local_execution_tree(tmp_path):
         root=tmp_path / "OmniVoiceStudio",
         ephemeral=True,
         input_root=Path("/kaggle/input"),
-        persistence_backend="none",
+        persistence_backend="kaggle-files-opt-in",
     )
     ensured = ensure_runtime_workspace(info)
     assert ensured is info
@@ -93,7 +112,7 @@ def test_project_studio_cli_uses_detected_execution_workspace(monkeypatch):
         root=Path("/kaggle/working/OmniVoiceStudio"),
         ephemeral=True,
         input_root=Path("/kaggle/input"),
-        persistence_backend="none",
+        persistence_backend="kaggle-files-opt-in",
     )
     monkeypatch.setattr(launcher, "detect_runtime_workspace", lambda: detected)
 

@@ -1,11 +1,19 @@
-# Kaggle local execution workspace
+# Kaggle local execution and Files-only persistence
 
-Project Studio treats Kaggle local SSD as an **execution workspace** and mirrors durable Studio state to external persistence when configured.
+OmniVoice Studio keeps the active Kaggle workspace on the fast writable filesystem at:
+
+```text
+/kaggle/working/OmniVoiceStudio
+```
+
+For persistence across Kaggle sessions and replacement VMs, enable **Session Persistence → Files only** in the Kaggle notebook settings. OmniVoice deliberately keeps heavy startup/model caches outside `/kaggle/working`, so Kaggle only needs to carry the Studio data that is expensive or impossible to recreate.
+
+No Google Drive OAuth, client secret, refresh token, or automatic Drive mirror is required for the normal Kaggle workflow.
 
 ## Runtime layout
 
 ```text
-/kaggle/working/OmniVoiceStudio/
+/kaggle/working/OmniVoiceStudio/     # user state; eligible for Files-only persistence
   projects/
     <project>/
       project.json
@@ -19,132 +27,117 @@ Project Studio treats Kaggle local SSD as an **execution workspace** and mirrors
   jobs.json
   hardware-quality.json
   advanced-settings.json
+
+/tmp/omnivoice/cache/                # heavy runtime cache; NOT persisted by Files only
+  <cache-key>/
+    pip/
+    wheels/
+    huggingface/
+    torch/
+    whisper/
+
+/tmp/omnivoice/bootstrap/            # temporary bootstrap/wheel workspace
+
+/kaggle/input/omnivoice-startup-cache/  # optional read-only warm-cache Dataset
 ```
 
-`/kaggle/input` is read-only source material. It can contain scripts or reference audio supplied through Kaggle datasets, but Project Studio never writes active projects, checkpoints, queue state, saved voices, jobs, or generated WAVs there.
+`/kaggle/input` is read-only source material. It can contain scripts, reference audio, or the optional startup-cache Dataset, but Studio never writes active projects or saved voices there.
 
-## Why local-first
+## Why this is faster than persisting all of `/kaggle/working`
 
-Long-form generation creates many small checkpoint/report/audio files. Keeping the active project on Kaggle local storage avoids remote-filesystem latency and keeps the existing section/chunk resume logic unchanged.
+Kaggle Files-only persistence snapshots files under `/kaggle/working`. Model downloads, Hugging Face snapshots, Torch caches, pip wheels, Whisper caches, and bootstrap files can be many gigabytes and contain thousands of files. Persisting those together with the user workspace makes session restore/save much heavier than necessary.
 
-Durability is handled out-of-band. On startup, OmniVoice can restore the complete Studio workspace from Google Drive into local SSD. While Studio is running it mirrors durable state periodically and performs a final sync on graceful shutdown.
-
-This full-workspace persistence covers saved voices, projects, queue/jobs, quality/advanced settings and generated artifacts. Startup cache metadata/evidence stays separate and is excluded from the user-data mirror.
-
-## Default workspace detection
-
-`omnivoice.runtime_workspace.detect_runtime_workspace()` selects:
+OmniVoice therefore uses a split-storage contract:
 
 ```text
-Kaggle  -> /kaggle/working/OmniVoiceStudio
-Colab   -> runtime detector may expose mounted MyDrive; the production Colab notebook explicitly runs generation from /content/OmniVoiceStudio and mirrors persistence outside the render hot path
-Local   -> ./OmniVoiceStudio
+small durable state  -> /kaggle/working/OmniVoiceStudio
+heavy reproducible cache -> /tmp/omnivoice
 ```
 
-`OMNIVOICE_STUDIO_HOME` overrides the default on every platform.
+The result is that Files-only persistence focuses on Saved Voice, Projects, resume state, settings, and generated Studio artifacts instead of carrying the model warehouse on every VM transition.
 
-Kaggle is detected by its environment variables or by the presence of `/kaggle/working`.
+## What survives with Files only enabled
 
-## Automatic persistence on Kaggle
-
-Kaggle local SSD is discarded with the hosted session, so persistence requires an external backend. OmniVoice supports a Google Drive mirror without putting OAuth credentials in the repository or Studio workspace.
-
-Configure these **Kaggle Secrets once**:
+The complete Studio workspace under `/kaggle/working/OmniVoiceStudio` is eligible to be carried to the next Kaggle session/VM, including:
 
 ```text
-OMNIVOICE_GDRIVE_CLIENT_ID
-OMNIVOICE_GDRIVE_CLIENT_SECRET
-OMNIVOICE_GDRIVE_TOKEN_JSON
-```
-
-Optional:
-
-```text
-OMNIVOICE_GDRIVE_DESTINATION=OmniVoiceStudio
-OMNIVOICE_PERSISTENCE_INTERVAL_SECONDS=15
-```
-
-At Studio startup OmniVoice:
-
-1. reads those secrets through Kaggle's secret API;
-2. keeps the OAuth material only in runtime-only storage;
-3. installs/reuses runtime `rclone` when needed;
-4. creates the Drive destination if it does not exist;
-5. restores the complete durable Studio workspace before the model/UI becomes active;
-6. mirrors local changes back to Drive while Studio is running;
-7. flushes once more on graceful shutdown.
-
-The default Drive mirror is:
-
-```text
-Google Drive/OmniVoiceStudio/
-```
-
-If the secrets are missing, Studio still starts, but logs an explicit warning that the Kaggle workspace is ephemeral instead of silently implying durability.
-
-## What survives restart
-
-With automatic persistence enabled, the mirror includes at least:
-
-```text
-voices/                 saved voice manifests, prompts, references
-projects/               project.json, studio.json, section state/history/audio
-artifacts/              standalone/Quick Audio artifacts
-project-queue.json       queue state
+voices/                  saved voice manifests, encoded prompts and references
+projects/                project manifests, Studio settings, section state/history/audio
+artifacts/               Quick Audio and other standalone artifacts
+project-queue.json       Project Queue state
 jobs.json                durable AI-native job state
 hardware-quality.json    quality defaults
 advanced-settings.json   advanced Studio settings
 ```
 
-Deleted local projects are also deleted from the mirror on the next sync so they are not resurrected during a later restore.
+Studio reads these files directly at startup. It does not copy them into a second internal persistence tree, so restarting the OmniVoice process in the same runtime also reuses the same state immediately.
 
-The following runtime/cache evidence is deliberately excluded:
+OmniVoice cannot query Kaggle's notebook-level Session Persistence switch reliably, so the runtime summary remains conservative and calls this backend `kaggle-files-opt-in`. The user must enable **Files only** in Kaggle for cross-session/VM durability.
+
+## What is intentionally not persisted by Files only
+
+Heavy/reproducible runtime resources are kept under `/tmp/omnivoice`:
 
 ```text
-.startup-cache/
-.startup-evidence/
-.runtime-cache.json
-startup-cache-evidence.json
-*.tmp
-.nfs*
+Hugging Face model cache
+Torch cache
+Whisper / ASR cache
+pip cache
+built wheel cache
+bootstrap scratch files
 ```
+
+They disappear with the VM. That is intentional: it keeps the persisted notebook footprint small.
+
+For faster model startup on a new VM, attach the separately managed startup-cache Dataset at:
+
+```text
+/kaggle/input/omnivoice-startup-cache
+```
+
+The bootstrap validates its compatibility/inventory and restores it into `/tmp/omnivoice/cache`. If the Dataset is absent or invalid, Studio uses the normal cold-download path without risking user data.
+
+## Optional startup-cache Dataset
+
+The startup-cache Dataset and Studio Files-only persistence solve different problems:
+
+- **Files only** preserves user state such as voices and projects.
+- **`omnivoice-startup-cache` Dataset** optionally accelerates dependency/model startup.
+
+A runtime cache prepared under `/tmp/omnivoice/cache` can still be intentionally packaged/versioned as the `omnivoice-startup-cache` Dataset when you want a new warm-cache snapshot. It is no longer exported automatically into `/kaggle/working/OmniVoiceStartupCache`, because doing so would make Files-only persistence carry those large files again.
+
+## Google Drive on Kaggle
+
+Google Drive remains available from **Settings → Storage & Backup** as an optional manual backup/export destination. It is no longer part of Kaggle startup persistence and no Kaggle secrets named `OMNIVOICE_GDRIVE_CLIENT_ID`, `OMNIVOICE_GDRIVE_CLIENT_SECRET`, or `OMNIVOICE_GDRIVE_TOKEN_JSON` are required for normal startup.
+
+Use manual Drive backup only when you want an additional off-Kaggle copy or need to move selected projects/voices elsewhere.
 
 ## Colab behavior
 
-The maintained Colab notebook mounts Google Drive and already uses a local-first `/content/OmniVoiceStudio` execution workspace with a persistent `MyDrive/OmniVoiceStudio` mirror. The launcher detects that notebook-owned mirror and does not start a second competing mirror thread.
+Colab keeps its existing behavior. The maintained Colab notebook can use mounted Google Drive as the durable workspace/mirror while generation stays on the local runtime path where appropriate. The Kaggle Files-only design does not change Colab persistence.
 
-If Studio is launched directly on Colab outside the maintained notebook, the launcher can use the mounted `MyDrive/OmniVoiceStudio` directory as the same full-workspace persistence backend.
+## Kaggle notebooks
 
-## Kaggle notebook
-
-Use:
+Use either:
 
 ```text
 notebooks/OmniVoice_Project_Studio_Kaggle.ipynb
 ```
 
-or the full Gradio notebook:
+or:
 
 ```text
 notebooks/OmniVoice_Project_Studio_Kaggle_Gradio.ipynb
 ```
 
-Both launchers use the same hosted persistence contract, so saved voices and projects are restored before UI/server startup when the Kaggle Secrets above are configured.
-
-On dual-T4 Kaggle sessions the production notebook pins OmniVoice to `cuda:0` and Whisper ASR to `cuda:1`; single-GPU sessions fall back to the hardware recommendation. Quality policy remains controlled by SAFE / BALANCED / FAST.
-
-## Persistent startup cache
-
-The runtime cache is intentionally separate from the Studio data mirror:
+Before a production run that must survive a new Kaggle VM, enable:
 
 ```text
-/kaggle/input/omnivoice-startup-cache     read-only cache source (optional)
-                 |
-                 v
-/kaggle/working/.cache/omnivoice          runtime-local hot cache
-                 |
-                 v
-/kaggle/working/OmniVoiceStartupCache     cache export for next Dataset version
+Session Persistence -> Files only
 ```
 
-A compatible attached Dataset activates the fast path. A missing/incompatible cache falls back to normal network installation/download and produces a new cache export. See `docs/hosted-runtime-cache.md` for fingerprint and invalidation rules.
+The notebooks keep Studio state at `/kaggle/working/OmniVoiceStudio` and heavy caches under `/tmp/omnivoice`.
+
+## Operational caveat
+
+Files-only persistence is a platform persistence mechanism, not an archival backup. For irreplaceable voices or completed production projects, an occasional manual external backup is still sensible. That backup is independent of the fast normal startup path and does not consume every session with automatic Drive synchronization.

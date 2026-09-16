@@ -2,11 +2,17 @@
 # Copyright 2026 OmniVoice contributors
 # Licensed under the Apache License, Version 2.0
 
-"""Persistent startup cache for ephemeral Colab/Kaggle runtimes.
+"""Persistent startup cache for hosted Colab/Kaggle runtimes.
 
 Active generation always uses runtime-local SSD. Persistent storage is only a
 restore/export source for pip wheels, Hugging Face/model data, Torch caches and
 ASR/Whisper artifacts.
+
+Kaggle deliberately keeps heavy startup/model caches out of ``/kaggle/working``
+so ``Session Persistence -> Files only`` only needs to carry the small Studio
+workspace (saved voices, projects, jobs and settings). Kaggle hot caches live in
+``/tmp/omnivoice/cache`` and can still be restored from an attached read-only
+``omnivoice-startup-cache`` Dataset.
 
 Cache reuse is deliberately fail-closed:
 
@@ -155,9 +161,11 @@ def detect_runtime_cache(
       OMNIVOICE_CACHE_SOURCE
       OMNIVOICE_CACHE_PERSIST_ROOT
 
-    Colab automatically uses mounted MyDrive as both source and sink. Kaggle can
-    restore from an attached read-only Dataset and exports a reusable cache tree
-    under /kaggle/working by default.
+    Colab automatically uses mounted MyDrive as both source and sink. Kaggle
+    restores from an attached read-only Dataset when present, but keeps its hot
+    cache under ``/tmp`` instead of ``/kaggle/working``. The default Kaggle
+    persist root intentionally points at the same runtime-local cache root, so
+    marking an export ready does not duplicate gigabytes of cache data.
     """
 
     env = os.environ if environ is None else environ
@@ -169,7 +177,7 @@ def detect_runtime_cache(
     elif environment == "colab":
         local_root = Path("/content/.cache/omnivoice")
     elif environment == "kaggle":
-        local_root = Path("/kaggle/working/.cache/omnivoice")
+        local_root = Path("/tmp/omnivoice/cache")
     else:
         local_root = (home or Path.home()) / ".cache" / "omnivoice"
 
@@ -189,7 +197,7 @@ def detect_runtime_cache(
         if source_root is None and path_exists(conventional_dataset):
             source_root = conventional_dataset
         if persist_root is None:
-            persist_root = Path("/kaggle/working/OmniVoiceStartupCache")
+            persist_root = local_root
 
     return RuntimeCacheLayout(
         environment=environment,
@@ -453,8 +461,28 @@ def persist_runtime_cache(preparation: CachePreparation) -> Optional[Path]:
         return None
     local = preparation.local_namespace
     _ensure_cache_tree(local)
-    target.mkdir(parents=True, exist_ok=True)
 
+    # Kaggle intentionally uses the runtime-local cache itself as its export
+    # root. Marking that namespace ready must not duplicate or delete its large
+    # model files. The whole root can still be versioned manually as a Kaggle
+    # Dataset when a new startup-cache snapshot is intentionally required.
+    try:
+        same_target = target.resolve() == local.resolve()
+    except OSError:
+        same_target = target == local
+    if same_target:
+        inventory = _tree_inventory(local)
+        _write_metadata(
+            local,
+            preparation.fingerprint,
+            state="ready",
+            restored_from=preparation.restored_from,
+            inventory=inventory,
+            reason="runtime-local cache marked ready in place",
+        )
+        return local
+
+    target.mkdir(parents=True, exist_ok=True)
     _write_metadata(
         target,
         preparation.fingerprint,
