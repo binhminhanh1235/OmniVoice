@@ -105,12 +105,13 @@ def test_priority_rest_routes_submit_the_same_durable_job_kinds(tmp_path):
             assert waited.json()["timed_out"] is False
 
 
-def test_artifact_route_reports_audio_metadata(tmp_path):
+def test_artifact_route_reports_audio_metadata_and_downloads_current_bytes(tmp_path):
     workspace = tmp_path / "studio"
     _project(workspace)
     path = workspace / "artifacts" / "audio" / "job_demo.wav"
     path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(path, np.zeros(2400, dtype=np.float32), 24000)
+    expected_bytes = path.read_bytes()
 
     app = create_studio_app(None, workspace, mount_ui=False)
     with TestClient(app) as client:
@@ -121,6 +122,34 @@ def test_artifact_route_reports_audio_metadata(tmp_path):
         assert item["duration_seconds"] == 0.1
         assert item["sample_rate"] == 24000
 
+        downloaded = client.get(f"/api/v1/artifacts/{item['id']}/content")
+        assert downloaded.status_code == 200
+        assert downloaded.content == expected_bytes
+        assert downloaded.headers["content-type"].startswith("audio/wav")
+        assert "job_demo.wav" in downloaded.headers["content-disposition"]
+
+        missing = client.get("/api/v1/artifacts/art_0000000000000000/content")
+        assert missing.status_code == 404
+
+        invalid = client.get("/api/v1/artifacts/not-an-artifact/content")
+        assert invalid.status_code == 400
+
+
+def test_artifact_content_does_not_expose_history_snapshots(tmp_path):
+    workspace = tmp_path / "studio"
+    project = _project(workspace)
+    history = project / "sections" / "S01" / "history" / "v0001" / "S01.wav"
+    history.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(history, np.zeros(2400, dtype=np.float32), 24000)
+
+    app = create_studio_app(None, workspace, mount_ui=False)
+    relative_path = history.resolve().relative_to(workspace.resolve()).as_posix()
+    history_id = app.state.artifact_catalog._artifact_id(relative_path)
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/artifacts/{history_id}/content")
+        assert response.status_code == 404
+
 
 def test_capabilities_publish_priority_tool_endpoints(tmp_path):
     app = create_studio_app(None, tmp_path / "studio", mount_ui=False)
@@ -128,8 +157,12 @@ def test_capabilities_publish_priority_tool_endpoints(tmp_path):
         payload = client.get("/api/v1/capabilities").json()
 
     assert payload["features"]["audio_artifacts"] is True
+    assert payload["features"]["artifact_content_download"] is True
     assert payload["features"]["standalone_audio_generation"] is True
     assert payload["features"]["targeted_regeneration"] is True
     assert payload["endpoints"]["generate_audio"] == "/api/v1/audio/generate"
     assert payload["endpoints"]["job_wait"].endswith("/wait")
     assert payload["endpoints"]["artifacts"] == "/api/v1/artifacts"
+    assert payload["endpoints"]["artifact_content"] == (
+        "/api/v1/artifacts/{artifact_id}/content"
+    )
