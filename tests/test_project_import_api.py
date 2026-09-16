@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -102,7 +100,7 @@ def test_import_is_idempotent_and_preserves_existing_artifacts(tmp_path):
         assert (root / "project.json").read_bytes() == original_manifest
 
 
-def test_import_same_id_different_source_or_chunk_options_conflicts(tmp_path):
+def test_import_same_id_different_source_or_options_conflicts(tmp_path):
     _app, client = create_client(tmp_path)
     with client:
         first = client.post(
@@ -131,6 +129,16 @@ def test_import_same_id_different_source_or_chunk_options_conflicts(tmp_path):
             },
         )
         assert changed_chunking.status_code == 409
+
+        changed_title_behavior = client.post(
+            "/api/v1/projects/import",
+            json={
+                "project_id": "demo-video",
+                "script": SCRIPT,
+                "speak_section_titles": True,
+            },
+        )
+        assert changed_title_behavior.status_code == 409
         assert (root / "script.md").read_text(encoding="utf-8") == original_script
         assert artifact.read_bytes() == b"keep-me"
 
@@ -156,6 +164,16 @@ def test_import_rejects_invalid_and_duplicate_sections_without_publishing_projec
         assert invalid.status_code == 400
         assert not (tmp_path / "studio" / "projects" / "invalid").exists()
 
+        malformed_timestamp = client.post(
+            "/api/v1/projects/import",
+            json={
+                "project_id": "bad-time",
+                "script": "# Bad time\n\n## S01 — not-a-time–0:20\nHello.",
+            },
+        )
+        assert malformed_timestamp.status_code == 400
+        assert not (tmp_path / "studio" / "projects" / "bad-time").exists()
+
         duplicate_script = """# Duplicate
 
 ## S01 — 0:00–0:10
@@ -170,6 +188,21 @@ Second.
         )
         assert duplicate.status_code == 400
         assert not (tmp_path / "studio" / "projects" / "duplicate").exists()
+
+
+def test_import_rejects_generation_runtime_fields_as_schema_errors(tmp_path):
+    _app, client = create_client(tmp_path)
+    with client:
+        response = client.post(
+            "/api/v1/projects/import",
+            json={
+                "project_id": "demo-video",
+                "script": SCRIPT,
+                "voice_name": "Narrator",
+            },
+        )
+        assert response.status_code == 422
+        assert not (tmp_path / "studio" / "projects" / "demo-video").exists()
 
 
 def test_import_uses_canonical_narration_behavior(tmp_path):
