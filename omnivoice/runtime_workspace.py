@@ -5,13 +5,14 @@
 
 """Runtime-local execution workspace selection.
 
-This module intentionally models only *execution* storage. Persistent/remote
-storage (Google Drive, rclone, object storage, etc.) is a separate concern and
-must not leak into Project/Queue generation paths.
+This module models the writable Studio execution/data workspace separately from
+large model/startup caches.
 
-For Kaggle the execution workspace is always local SSD under
-``/kaggle/working``. ``/kaggle/input`` is treated as read-only source material,
-never as a writable Project Studio workspace.
+For Kaggle, user state lives under ``/kaggle/working`` so Kaggle's
+``Session Persistence -> Files only`` can carry saved voices, projects, jobs and
+settings across sessions/VMs. Heavy startup/model caches are intentionally kept
+outside ``/kaggle/working`` by the hosted-cache layer. ``/kaggle/input`` remains
+read-only source material and is never used as an active Studio workspace.
 """
 
 from __future__ import annotations
@@ -41,6 +42,14 @@ class RuntimeWorkspace:
 
 def _default_exists(path: Path) -> bool:
     return path.exists()
+
+
+def _under_kaggle_working(path: Path) -> bool:
+    try:
+        path.expanduser().resolve().relative_to(Path("/kaggle/working").resolve())
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def detect_runtime_environment(
@@ -84,12 +93,23 @@ def detect_runtime_workspace(
 
     if configured:
         root = Path(configured).expanduser()
+        kaggle_files = environment == "kaggle" and _under_kaggle_working(root)
         return RuntimeWorkspace(
             environment=environment,
             root=root,
             ephemeral=(environment in {"kaggle", "colab"}),
             input_root=(Path("/kaggle/input") if environment == "kaggle" else None),
-            notes=("Workspace overridden by OMNIVOICE_STUDIO_HOME.",),
+            persistence_backend=("kaggle-files-opt-in" if kaggle_files else "none"),
+            notes=(
+                "Workspace overridden by OMNIVOICE_STUDIO_HOME.",
+                *(
+                    (
+                        "Enable Kaggle Session Persistence -> Files only to carry this workspace across sessions/VMs.",
+                    )
+                    if kaggle_files
+                    else ()
+                ),
+            ),
         )
 
     if environment == "kaggle":
@@ -98,11 +118,12 @@ def detect_runtime_workspace(
             root=Path("/kaggle/working/OmniVoiceStudio"),
             ephemeral=True,
             input_root=Path("/kaggle/input"),
-            persistence_backend="none",
+            persistence_backend="kaggle-files-opt-in",
             notes=(
-                "Using Kaggle local SSD for all Project Studio writes.",
-                "This workspace is ephemeral and is lost when the Kaggle session is discarded.",
-                "/kaggle/input is read-only and should only be used as an import source.",
+                "Using /kaggle/working/OmniVoiceStudio for saved voices, projects and Studio state.",
+                "Enable Kaggle Session Persistence -> Files only to carry this workspace across sessions/VMs.",
+                "Heavy startup/model caches are kept outside /kaggle/working to keep persistence small.",
+                "/kaggle/input is read-only and should only be used as an import/cache source.",
             ),
         )
 
