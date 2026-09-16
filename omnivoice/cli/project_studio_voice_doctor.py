@@ -43,9 +43,6 @@ logger = logging.getLogger(__name__)
 def build_demo(model, workspace: str | Path):
     import gradio as gr
 
-    # Keep one controller contract across the normal workspace, queue, recovery,
-    # history, quality and advanced settings. Project-shaping metadata such as
-    # speak_section_titles is preserved when later generation settings are saved.
     quality_module.QualityPresetProjectStudioController = UnifiedWorkspaceController
     install_quality_controller()
 
@@ -142,8 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace",
         default=str(runtime.root),
         help=(
-            "Execution workspace. Kaggle defaults to "
-            "/kaggle/working/OmniVoiceStudio (local SSD with optional automatic Drive persistence)."
+            "Execution/data workspace. Kaggle defaults to /kaggle/working/OmniVoiceStudio; "
+            "enable Kaggle Session Persistence -> Files only to carry saved voices, projects, "
+            "jobs and settings across sessions/VMs. Heavy caches stay outside /kaggle/working."
         ),
     )
     parser.add_argument("--asr-model", default="openai/whisper-small.en")
