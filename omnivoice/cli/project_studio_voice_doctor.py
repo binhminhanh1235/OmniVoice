@@ -32,6 +32,7 @@ from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.unified_controller import UnifiedWorkspaceController
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
 from omnivoice.hardware_quality import detect_hardware
+from omnivoice.hosted_persistence import prepare_hosted_workspace_persistence
 from omnivoice.lazy_asr import configure_lazy_asr, should_defer_asr_startup
 from omnivoice.runtime_workspace import detect_runtime_workspace
 from omnivoice.utils.common import get_best_device
@@ -142,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(runtime.root),
         help=(
             "Execution workspace. Kaggle defaults to "
-            "/kaggle/working/OmniVoiceStudio (local ephemeral SSD)."
+            "/kaggle/working/OmniVoiceStudio (local SSD with optional automatic Drive persistence)."
         ),
     )
     parser.add_argument("--asr-model", default="openai/whisper-small.en")
@@ -169,17 +170,18 @@ def main(argv=None) -> int:
     runtime = detect_runtime_workspace()
     workspace = Path(args.workspace).expanduser()
     workspace.mkdir(parents=True, exist_ok=True)
+    persistence = prepare_hosted_workspace_persistence(runtime, workspace)
+
     logger.info(
         "Runtime environment=%s execution_workspace=%s persistence=%s",
         runtime.environment,
         workspace,
-        runtime.persistence_backend,
+        persistence.backend if persistence.available else runtime.persistence_backend,
     )
-    if runtime.environment == "kaggle":
-        logger.warning(
-            "Kaggle execution workspace is local/ephemeral. "
-            "Remote persistence is optional and can be configured from Settings > Storage & Backup."
-        )
+    if persistence.available:
+        logger.info("Workspace persistence: %s", persistence.message)
+    elif runtime.ephemeral:
+        logger.warning("Workspace persistence: %s", persistence.message)
 
     device = args.device or get_best_device()
     hardware = detect_hardware()
@@ -210,13 +212,19 @@ def main(argv=None) -> int:
     if defer_cpu_asr:
         logger.info("CPU ASR startup deferred until first transcription/verification request.")
     demo = build_demo(model, workspace)
-    demo.queue().launch(
-        server_name=args.ip,
-        server_port=args.port,
-        share=args.share,
-        show_error=True,
-    )
-    return 0
+    try:
+        demo.queue().launch(
+            server_name=args.ip,
+            server_port=args.port,
+            share=args.share,
+            show_error=True,
+        )
+        return 0
+    finally:
+        try:
+            persistence.close()
+        except Exception as exc:
+            logger.warning("Final workspace persistence sync failed: %s: %s", type(exc).__name__, exc)
 
 
 if __name__ == "__main__":
