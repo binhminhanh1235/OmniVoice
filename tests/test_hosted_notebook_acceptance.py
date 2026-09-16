@@ -80,7 +80,7 @@ def test_colab_acceptance_keeps_cpu_asr_lazy_and_drive_evidence_persistent():
     assert "/content/OmniVoiceStudio" in all_source
 
 
-def test_kaggle_acceptance_carries_cold_evidence_across_dataset_boundary():
+def test_kaggle_acceptance_keeps_user_state_in_working_and_cache_outside_it():
     notebook = _load_notebook("OmniVoice_Project_Studio_Kaggle.ipynb")
     acceptance = _find_acceptance_cell(notebook)
     all_source = "\n".join(_cell_source(cell) for cell in notebook["cells"])
@@ -89,13 +89,16 @@ def test_kaggle_acceptance_carries_cold_evidence_across_dataset_boundary():
     assert "CACHE_EXPORT_BASE" in acceptance
     assert "source_acceptance" in acceptance
     assert "shutil.copytree" in acceptance
-    assert "/kaggle/working/hosted_cache_acceptance.py" in acceptance
+    assert "/tmp/omnivoice/hosted_cache_acceptance.py" in acceptance
     assert "--asr-device {ASR_DEVICE}" in all_source
     assert "/kaggle/working/OmniVoiceStudio" in all_source
     assert "/kaggle/input/omnivoice-startup-cache" in all_source
+    assert "Session Persistence -> Files only" in all_source
+    assert "/tmp/omnivoice/cloudflared" in all_source
+    assert "/kaggle/working/OmniVoiceStartupCache" not in all_source
 
 
-def test_kaggle_gradio_notebook_exposes_full_studio_and_safe_public_modes():
+def test_kaggle_gradio_notebook_exposes_full_studio_and_slim_files_persistence():
     name = "OmniVoice_Project_Studio_Kaggle_Gradio.ipynb"
     notebook = _load_notebook(name)
     _compile_all_code_cells(notebook, name)
@@ -123,7 +126,9 @@ def test_kaggle_gradio_notebook_exposes_full_studio_and_safe_public_modes():
     assert "CACHE_EXPORT_BASE" in acceptance
     assert "source_acceptance" in acceptance
     assert "shutil.copytree" in acceptance
-    assert "/kaggle/working/hosted_cache_acceptance.py" in acceptance
-    assert "/kaggle/working/OmniVoiceStartupCache" in all_source
+    assert "/tmp/omnivoice/hosted_cache_acceptance.py" in acceptance
+    assert "/kaggle/working/OmniVoiceStartupCache" not in all_source
     assert "/kaggle/input/omnivoice-startup-cache" in all_source
+    assert "/tmp/omnivoice/cloudflared" in all_source
+    assert "Session Persistence -> Files only" in all_source
     assert "persist_runtime_cache(CACHE_PREPARATION)" in all_source
