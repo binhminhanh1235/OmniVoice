@@ -230,7 +230,7 @@ def bootstrap_hosted_runtime(
     *,
     environ: Optional[Mapping[str, str]] = None,
 ) -> dict[str, object]:
-    """Install an exact OmniVoice revision and prepare persistent startup caches."""
+    """Install an exact OmniVoice revision and prepare hosted runtime caches."""
 
     started = time.perf_counter()
     package_ref = validate_exact_revision(package_ref, label="OmniVoice package revision")
@@ -261,15 +261,31 @@ def bootstrap_hosted_runtime(
         source_base: Optional[Path] = persistent_workspace / ".startup-cache"
         persist_base = source_base
         bootstrap_base = Path("/content/.cache/omnivoice-bootstrap")
+        persistence_ready = persistent_workspace.parent.exists()
+        persistence_hint = (
+            "Colab Studio state mirrors to mounted Google Drive."
+            if persistence_ready
+            else "Mount Google Drive to persist Colab Studio state across runtimes."
+        )
     else:
+        # Keep only user state under /kaggle/working so Kaggle Files-only
+        # persistence stays small and fast. Heavy pip/model/Torch/Whisper caches
+        # are runtime-local under /tmp and are never part of the notebook file
+        # snapshot. A separately attached startup-cache Dataset remains a valid
+        # read-only warm-cache source.
         workspace = Path("/kaggle/working/OmniVoiceStudio")
-        persistent_workspace = None
-        local_cache_base = Path("/kaggle/working/.cache/omnivoice")
+        persistent_workspace = workspace
+        local_cache_base = Path("/tmp/omnivoice/cache")
         attached = Path("/kaggle/input/omnivoice-startup-cache")
-        exported = Path("/kaggle/working/OmniVoiceStartupCache")
-        source_base = attached if attached.exists() else (exported if exported.exists() else None)
-        persist_base = exported
-        bootstrap_base = Path("/kaggle/working/.cache/omnivoice-bootstrap")
+        source_base = attached if attached.exists() else None
+        persist_base = local_cache_base
+        bootstrap_base = Path("/tmp/omnivoice/bootstrap")
+        persistence_ready = True
+        persistence_hint = (
+            "Kaggle persistence layout is ready: saved voices, projects, jobs and settings stay "
+            "under /kaggle/working/OmniVoiceStudio while heavy caches stay under /tmp. "
+            "Enable Kaggle Session Persistence -> Files only to carry Studio state across sessions/VMs."
+        )
 
     workspace.mkdir(parents=True, exist_ok=True)
     local_cache_base.mkdir(parents=True, exist_ok=True)
@@ -328,22 +344,6 @@ def bootstrap_hosted_runtime(
         [sys.executable, "-m", "pip", "install", "-q", "--upgrade", str(wheel)]
     )
 
-    persistence_ready = False
-    persistence_hint = "Hosted workspace persistence is not configured by bootstrap."
-    if runtime == "kaggle":
-        try:
-            from omnivoice.hosted_persistence import configure_kaggle_drive_connection
-
-            persistence_ready, persistence_hint = configure_kaggle_drive_connection(
-                workspace,
-                environ=env,
-            )
-        except Exception as exc:
-            persistence_hint = (
-                "Could not stage Kaggle Drive persistence credentials before server launch: "
-                f"{type(exc).__name__}: {exc}"
-            )
-
     os.environ["OMNIVOICE_LOCAL_CACHE_ROOT"] = str(local_cache_base)
     if source_base is not None:
         os.environ["OMNIVOICE_CACHE_SOURCE"] = str(source_base)
@@ -391,9 +391,8 @@ def bootstrap_hosted_runtime(
     print("Bootstrap cache:", "FAST" if bootstrap_fast else "COLD", "-", bootstrap_reason)
     print("Resource cache:", "FAST" if preparation.fast_path else "COLD", "-", preparation.reason)
     print("Exact wheel:", "FAST" if wheel_fast_path else "BUILT")
-    if runtime == "kaggle":
-        print("Workspace persistence credentials:", "READY" if persistence_ready else "NOT READY")
-        print("Workspace persistence note:", persistence_hint)
+    print("Workspace persistence layout:", "READY" if persistence_ready else "NOT READY")
+    print("Workspace persistence note:", persistence_hint)
     print("Local cache:", preparation.local_namespace)
     print("Startup evidence:", evidence_path)
 
