@@ -68,7 +68,7 @@ def create_studio_app(
     auth_config: Optional[StudioAuthConfig] = None,
 ):
     from fastapi import FastAPI, Header, HTTPException, Query
-    from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+    from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 
     auth = auth_config or StudioAuthConfig.from_env()
     auth.validate(mount_ui=mount_ui, mount_mcp=mount_mcp)
@@ -200,6 +200,7 @@ def create_studio_app(
         payload["features"]["async_generation"] = True
         payload["features"]["sse_job_stream"] = True
         payload["features"]["audio_artifacts"] = True
+        payload["features"]["artifact_content_download"] = True
         payload["features"]["standalone_audio_generation"] = True
         payload["features"]["preview_audio"] = True
         payload["features"]["targeted_regeneration"] = True
@@ -212,6 +213,7 @@ def create_studio_app(
         payload["endpoints"]["generate_audio"] = "/api/v1/audio/generate"
         payload["endpoints"]["preview_audio"] = "/api/v1/audio/preview"
         payload["endpoints"]["artifacts"] = "/api/v1/artifacts"
+        payload["endpoints"]["artifact_content"] = "/api/v1/artifacts/{artifact_id}/content"
         payload["endpoints"]["project_import"] = "/api/v1/projects/import"
         payload["endpoints"]["generate_project"] = "/api/v1/projects/{project_id}/generate"
         payload["endpoints"]["regenerate_section"] = (
@@ -361,6 +363,20 @@ def create_studio_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Project not found") from exc
+
+    @app.get("/api/v1/artifacts/{artifact_id}/content", tags=["audio"])
+    def artifact_content(artifact_id: str):
+        try:
+            item = artifacts.get(artifact_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Artifact not found") from exc
+        return FileResponse(
+            path=item["path"],
+            media_type="audio/wav",
+            filename=item["filename"],
+        )
 
     @app.get("/api/v1/queue", tags=["queue"])
     def queue_summary():
