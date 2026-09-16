@@ -53,6 +53,18 @@ def test_runtime_kind_uses_content_path_as_colab_fallback():
     assert bootstrap._runtime_kind({}, path_exists=path_exists) == "colab"
 
 
+def test_kaggle_bootstrap_keeps_heavy_cache_out_of_files_only_snapshot():
+    source = BOOTSTRAP_PATH.read_text(encoding="utf-8")
+
+    assert 'workspace = Path("/kaggle/working/OmniVoiceStudio")' in source
+    assert 'local_cache_base = Path("/tmp/omnivoice/cache")' in source
+    assert 'bootstrap_base = Path("/tmp/omnivoice/bootstrap")' in source
+    assert 'attached = Path("/kaggle/input/omnivoice-startup-cache")' in source
+    assert "configure_kaggle_drive_connection" not in source
+    assert "OMNIVOICE_GDRIVE_" not in source
+    assert "Session Persistence -> Files only" in source
+
+
 def test_wheel_manifest_detects_content_corruption(tmp_path):
     package_ref = "b" * 40
     wheel_dir = tmp_path / "wheels"
