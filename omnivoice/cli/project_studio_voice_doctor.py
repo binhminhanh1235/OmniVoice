@@ -27,6 +27,7 @@ from omnivoice.cli.project_studio_quality import (
 from omnivoice.cli.project_workspace import build_project_workspace_demo
 from omnivoice.cli.section_export_ui import build_section_export_demo
 from omnivoice.cli.section_history_ui import build_section_history_demo
+from omnivoice.cli.standalone_audio_ui import build_standalone_audio_demo
 from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.unified_controller import UnifiedWorkspaceController
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
@@ -46,6 +47,12 @@ def build_demo(model, workspace: str | Path):
     # speak_section_titles is preserved when later generation settings are saved.
     quality_module.QualityPresetProjectStudioController = UnifiedWorkspaceController
     install_quality_controller()
+
+    quick_audio = build_standalone_audio_demo(
+        model,
+        workspace,
+        controller_cls=UnifiedWorkspaceController,
+    )
 
     project_workspace = build_project_workspace_demo(
         model,
@@ -105,8 +112,14 @@ def build_demo(model, workspace: str | Path):
     )
 
     demo = gr.TabbedInterface(
-        [projects, jobs, voice_doctor, settings],
-        ["1. Projects", "2. Jobs", "3. Voice Library", "4. Settings"],
+        [quick_audio, projects, jobs, voice_doctor, settings],
+        [
+            "1. Quick Audio",
+            "2. Projects",
+            "3. Jobs",
+            "4. Voice Library",
+            "5. Settings",
+        ],
         title="OmniVoice Studio",
     )
     audio_players = enable_audio_download_buttons(demo)
@@ -118,8 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
     runtime = detect_runtime_workspace()
     parser = argparse.ArgumentParser(
         description=(
-            "Launch OmniVoice Studio with a unified project workflow, voice tools, "
-            "persistent jobs, quality presets and advanced settings"
+            "Launch OmniVoice Studio with standalone Quick Audio, a unified project "
+            "workflow, voice tools, persistent jobs, quality presets and advanced settings"
         )
     )
     parser.add_argument("--model", default="k2-fsa/OmniVoice")
