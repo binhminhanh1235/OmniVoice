@@ -63,6 +63,7 @@ on:
       - "docs/ai-native-foundation.md"
       - "docs/ai-native-sse.md"
       - "docs/ai-native-mcp.md"
+      - "docs/project-import-api.md"
       - "docs/stable-tunnel.md"
       - "docs/voice-style-bank.md"
       - "docs/preview-before-render.md"
@@ -89,6 +90,7 @@ on:
       - "tests/test_runtime_cache.py"
       - "tests/test_studio_service.py"
       - "tests/test_studio_server.py"
+      - "tests/test_project_import_api.py"
       - "tests/test_job_manager.py"
       - "tests/test_studio_commands.py"
       - "tests/test_mcp_server.py"
@@ -206,6 +208,7 @@ jobs:
             tests/test_runtime_cache.py \
             tests/test_studio_service.py \
             tests/test_studio_server.py \
+            tests/test_project_import_api.py \
             tests/test_job_manager.py \
             tests/test_studio_commands.py \
             tests/test_mcp_server.py \
