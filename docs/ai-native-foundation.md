@@ -13,14 +13,14 @@ OmniVoice Studio is one production engine with multiple interfaces:
               |                |                |
               +-------- Application Layer -----+
                                |
-                      Persistent Job Manager
+                  Project import / Job Manager
                                |
                     Project / Voice / Queue
                                |
                          OmniVoice Core
 ```
 
-The Gradio UI remains first-class. REST, CLI and MCP reuse the same service/job layers rather than duplicating generation logic.
+The Gradio UI remains first-class. REST, CLI and MCP reuse the same service/job layers rather than duplicating generation logic. Native project import is deliberately synchronous because it only validates and persists project files; GPU-bound generation continues through the durable Job Manager.
 
 ## Unified server
 
@@ -41,6 +41,7 @@ Current surfaces:
 /api/v1/audio/generate                standalone async audio generation
 /api/v1/audio/preview                 direct/project non-destructive previews
 /api/v1/projects                      project list
+POST /api/v1/projects/import          synchronous native Markdown project import
 /api/v1/projects/{id}                 one project summary
 POST /api/v1/projects/{id}/generate   async resumable generation
 /api/v1/artifacts                     generated WAV artifact discovery
@@ -59,7 +60,7 @@ Targeted regeneration is also exposed for one section or one chunk through REST,
 
 ## Application service boundary
 
-`StudioService` owns read operations. `StudioCommandService` owns generation command semantics. REST and MCP submit durable work through `StudioJobManager`.
+`StudioService` owns read operations. `StudioCommandService` owns GPU generation command semantics. `StudioProjectImportService` owns synchronous native project import. REST and MCP submit GPU-bound work through `StudioJobManager`; import bypasses the queue because it performs no inference.
 
 ```text
 FastAPI route ----+
@@ -69,7 +70,37 @@ CLI -> REST ------+                  v
                               StudioJobManager
                                      |
                           project/status/queue modules
+
+POST /projects/import
+        |
+        +--> StudioProjectImportService
+                 |
+                 +--> canonical narration parser/project creator
+                 +--> atomic project publication
 ```
+
+## Native project import
+
+External orchestrators can create a Studio project from the same native Markdown consumed by Project Studio:
+
+```http
+POST /api/v1/projects/import
+```
+
+The operation reuses `create_narration_project(...)`, preserves the original `script.md`, and does not extend the OmniVoice grammar with visual-provider metadata. It trims and validates `project_id`, stages outside `<workspace>/projects`, and atomically publishes the completed project.
+
+A repeated request with the same project ID, canonical source hash, and chunk options returns the existing project with `created: false`. A different source/options combination for an occupied ID returns `409 Conflict` without overwriting project files or generated audio.
+
+Capability discovery advertises both:
+
+```json
+{
+  "features": {"project_import": true},
+  "endpoints": {"project_import": "/api/v1/projects/import"}
+}
+```
+
+See [project-import-api.md](project-import-api.md) for the request/response contract and curl examples.
 
 ## Persistent single-GPU Job Manager
 
@@ -89,6 +120,8 @@ State and bounded event history are stored in `<workspace>/jobs.json`. If a runt
 ### Idempotency
 
 `StudioJobManager.submit(..., idempotency_key=...)` returns the existing job for a repeated key instead of duplicating work. REST exposes this through the `Idempotency-Key` header.
+
+Project import has separate resource idempotency: the stable `project_id` plus canonical source/options identify the import. It does not create a fake Job Manager record.
 
 ### Cooperative cancellation
 
@@ -117,6 +150,12 @@ command -> job_id -> wait_job -> list_artifacts
 ```
 
 `wait_job` uses the same condition/event mechanism as SSE instead of repeated polling. `list_artifacts` derives audio metadata from durable workspace files and covers standalone audio, previews, chunks, beats, sections and merged project audio.
+
+Project import is a setup operation before that lifecycle:
+
+```text
+import native script -> project_id -> generate_project -> job_id -> wait_job
+```
 
 See [ai-native-mcp.md](ai-native-mcp.md).
 
@@ -172,6 +211,8 @@ omnivoice:mcp
 omnivoice:admin
 ```
 
+`POST /api/v1/projects/import` is a machine-facing write operation and uses `omnivoice:generate`, matching the existing generation write boundary.
+
 The Gradio UI can use username/password protection or an explicitly trusted external UI auth boundary. Public deployment fails closed unless the required authentication boundary is configured, unless an explicit insecure test override is requested.
 
 ## Current development sequence
@@ -194,14 +235,15 @@ Implemented foundation:
 14. [x] Non-destructive `preview_audio`.
 15. [x] Targeted section/chunk regeneration tools.
 16. [x] Umbrella CLI parity for the nine priority tools.
+17. [x] Native Markdown project import REST API with atomic/idempotent publication.
 
 Planned next:
 
-17. [ ] artifact download endpoint + HTTP Range/resume.
-18. [ ] merge/export API/tool and production package.
-19. [ ] queue mutation API/tools.
-20. [ ] Universal OmniVoice Skill.
-21. [ ] ChatGPT / Claude Code / generic MCP examples.
-22. [ ] optional persistent control plane + worker registry.
+18. [ ] artifact download endpoint + HTTP Range/resume.
+19. [ ] merge/export API/tool and production package.
+20. [ ] queue mutation API/tools.
+21. [ ] Universal OmniVoice Skill.
+22. [ ] ChatGPT / Claude Code / generic MCP examples.
+23. [ ] optional persistent control plane + worker registry.
 
 The canonical broader status remains in [project-studio-roadmap.md](project-studio-roadmap.md).
