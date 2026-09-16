@@ -19,12 +19,14 @@ workspace or repository.
 from __future__ import annotations
 
 import atexit
+import json
+import logging
 import os
 import shutil
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from omnivoice.data_management import (
     _normalise_destination,
@@ -36,6 +38,8 @@ from omnivoice.data_management import (
 from omnivoice.runtime_rclone import install_rclone_runtime
 from omnivoice.runtime_workspace import RuntimeWorkspace
 
+logger = logging.getLogger(__name__)
+
 PERSISTENCE_INTERVAL_ENV = "OMNIVOICE_PERSISTENCE_INTERVAL_SECONDS"
 PERSISTENCE_MODE_ENV = "OMNIVOICE_PERSISTENCE_MODE"
 GDRIVE_CLIENT_ID_ENV = "OMNIVOICE_GDRIVE_CLIENT_ID"
@@ -45,6 +49,7 @@ GDRIVE_DESTINATION_ENV = "OMNIVOICE_GDRIVE_DESTINATION"
 DEFAULT_DESTINATION = "OmniVoiceStudio"
 DEFAULT_INTERVAL_SECONDS = 15.0
 _MIRROR_THREAD_NAME = "omnivoice-drive-mirror"
+_REBASE_JSON_FILES = ("project-queue.json", "jobs.json")
 
 # Startup-cache evidence belongs to the runtime/cache subsystem, not the user
 # workspace. Everything else under the workspace is durable Studio state.
@@ -127,6 +132,71 @@ def _copy_workspace_tree(source: Path, destination: Path, *, delete: bool) -> No
                 path.rmdir()
             except OSError:
                 pass
+
+
+def _rebase_hosted_path(value: str, workspace: Path) -> str:
+    """Rebase a default hosted workspace path after moving Kaggle <-> Colab."""
+
+    if not value.startswith("/"):
+        return value
+    marker = "/OmniVoiceStudio"
+    index = value.find(marker)
+    if index < 0:
+        return value
+    marker_end = index + len(marker)
+    if marker_end < len(value) and value[marker_end] != "/":
+        return value
+    suffix = value[marker_end:].lstrip("/")
+    root = workspace.expanduser().resolve()
+    return str(root / suffix) if suffix else str(root)
+
+
+def _rebase_payload(value: Any, workspace: Path) -> tuple[Any, int]:
+    if isinstance(value, str):
+        rebased = _rebase_hosted_path(value, workspace)
+        return rebased, int(rebased != value)
+    if isinstance(value, list):
+        changed = 0
+        items = []
+        for item in value:
+            rebased, count = _rebase_payload(item, workspace)
+            items.append(rebased)
+            changed += count
+        return items, changed
+    if isinstance(value, dict):
+        changed = 0
+        payload: dict[str, Any] = {}
+        for key, item in value.items():
+            rebased, count = _rebase_payload(item, workspace)
+            payload[key] = rebased
+            changed += count
+        return payload, changed
+    return value, 0
+
+
+def _rebase_restored_runtime_state(workspace: Path) -> int:
+    """Make queue/job absolute paths portable across hosted runtime roots."""
+
+    total = 0
+    for filename in _REBASE_JSON_FILES:
+        path = workspace / filename
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        rebased, changed = _rebase_payload(payload, workspace)
+        if not changed:
+            continue
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text(
+            json.dumps(rebased, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp.replace(path)
+        total += changed
+    return total
 
 
 def _thread_running(name: str = _MIRROR_THREAD_NAME) -> bool:
@@ -215,8 +285,7 @@ class HostedWorkspacePersistence:
                 if self.persistent_root is None:
                     raise RuntimeError("Colab persistence root is missing")
                 _copy_workspace_tree(self.persistent_root, self.workspace, delete=False)
-                return
-            if self.backend == "google-drive-rclone":
+            elif self.backend == "google-drive-rclone":
                 _run_rclone(self.workspace, ["mkdir", self.remote_path])
                 _run_rclone(
                     self.workspace,
@@ -228,8 +297,12 @@ class HostedWorkspacePersistence:
                         *_rclone_exclude_args(),
                     ],
                 )
-                return
-            raise RuntimeError(f"Unsupported persistence backend: {self.backend}")
+            else:
+                raise RuntimeError(f"Unsupported persistence backend: {self.backend}")
+
+            rebased = _rebase_restored_runtime_state(self.workspace)
+            if rebased:
+                self.message += f" Rebased {rebased} restored queue/job path value(s) to this runtime."
 
     def sync_now(self) -> None:
         if not self.available or self.externally_managed or self._closed:
@@ -259,10 +332,14 @@ class HostedWorkspacePersistence:
         while not self._stop.wait(self.interval_seconds):
             try:
                 self.sync_now()
-            except Exception:
-                # Background persistence must never crash TTS generation. The
-                # next interval retries; explicit startup/close sync still raises.
-                continue
+            except Exception as exc:
+                # Persistence failure must not crash TTS generation. Keep retrying
+                # and surface a warning without printing any credential material.
+                logger.warning(
+                    "Hosted workspace background sync failed; retrying next interval: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
 
     def start(self) -> None:
         if not self.available or self.externally_managed or self._thread is not None:
@@ -320,7 +397,16 @@ def prepare_hosted_workspace_persistence(
 
     if runtime.environment == "colab":
         persistent_root = Path("/content/drive/MyDrive/OmniVoiceStudio")
-        if persistent_root.exists() and persistent_root.resolve() != workspace_path.resolve():
+        if persistent_root.exists():
+            if persistent_root.resolve() == workspace_path.resolve():
+                return HostedWorkspacePersistence(
+                    runtime=runtime,
+                    workspace=workspace_path,
+                    backend="colab-drive-direct",
+                    interval_seconds=interval,
+                    available=False,
+                    message="Studio workspace is already located on mounted Google Drive; no mirror is required.",
+                )
             session = HostedWorkspacePersistence(
                 runtime=runtime,
                 workspace=workspace_path,
