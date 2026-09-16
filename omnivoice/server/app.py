@@ -22,11 +22,16 @@ from omnivoice.runtime_workspace import RuntimeWorkspace
 from omnivoice.server.schemas import (
     GenerateAudioRequest,
     GenerateProjectRequest,
+    ImportProjectRequest,
     PreviewAudioRequest,
     RegenerateRequest,
 )
 from omnivoice.services.job_manager import JobEvent, StudioJobManager
 from omnivoice.services.job_wait import wait_for_job
+from omnivoice.services.project_import import (
+    ProjectImportConflict,
+    StudioProjectImportService,
+)
 from omnivoice.services.studio_commands import StudioCommandService
 from omnivoice.services.studio_service import StudioService
 
@@ -71,6 +76,7 @@ def create_studio_app(
     service = StudioService(model, workspace, runtime=runtime)
     jobs = StudioJobManager(workspace)
     commands = command_service or StudioCommandService(model, workspace)
+    project_imports = StudioProjectImportService(workspace)
     artifacts = ArtifactCatalog(workspace)
 
     # Custom command services used by tests/integrators may implement only a
@@ -124,6 +130,7 @@ def create_studio_app(
 
     app.state.studio_service = service
     app.state.command_service = commands
+    app.state.project_import_service = project_imports
     app.state.job_manager = jobs
     app.state.artifact_catalog = artifacts
     app.state.omnivoice_model = model
@@ -196,6 +203,7 @@ def create_studio_app(
         payload["features"]["standalone_audio_generation"] = True
         payload["features"]["preview_audio"] = True
         payload["features"]["targeted_regeneration"] = True
+        payload["features"]["project_import"] = True
         payload["features"]["mcp"] = mcp_server is not None
         payload["features"]["bearer_auth"] = auth.bearer_enabled
         payload["endpoints"]["jobs"] = "/api/v1/jobs"
@@ -204,6 +212,7 @@ def create_studio_app(
         payload["endpoints"]["generate_audio"] = "/api/v1/audio/generate"
         payload["endpoints"]["preview_audio"] = "/api/v1/audio/preview"
         payload["endpoints"]["artifacts"] = "/api/v1/artifacts"
+        payload["endpoints"]["project_import"] = "/api/v1/projects/import"
         payload["endpoints"]["generate_project"] = "/api/v1/projects/{project_id}/generate"
         payload["endpoints"]["regenerate_section"] = (
             "/api/v1/projects/{project_id}/sections/{section_id}/regenerate"
@@ -229,6 +238,25 @@ def create_studio_app(
             return {"items": service.list_projects(status)}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/projects/import", tags=["projects"])
+    def import_project(request: ImportProjectRequest):
+        try:
+            payload = project_imports.import_project(**request.model_dump())
+        except ProjectImportConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        project_id = payload["project_id"]
+        payload["links"] = {
+            "self": f"/api/v1/projects/{project_id}",
+            "generate": f"/api/v1/projects/{project_id}/generate",
+        }
+        return JSONResponse(
+            status_code=201 if payload["created"] else 200,
+            content=payload,
+        )
 
     @app.get("/api/v1/projects/{project_id}", tags=["projects"])
     def get_project(project_id: str):
@@ -448,6 +476,7 @@ def create_studio_app(
         )
         app.state.studio_service = service
         app.state.command_service = commands
+        app.state.project_import_service = project_imports
         app.state.job_manager = jobs
         app.state.artifact_catalog = artifacts
         app.state.omnivoice_model = model
