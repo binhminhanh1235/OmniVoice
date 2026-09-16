@@ -328,6 +328,22 @@ def bootstrap_hosted_runtime(
         [sys.executable, "-m", "pip", "install", "-q", "--upgrade", str(wheel)]
     )
 
+    persistence_ready = False
+    persistence_hint = "Hosted workspace persistence is not configured by bootstrap."
+    if runtime == "kaggle":
+        try:
+            from omnivoice.hosted_persistence import configure_kaggle_drive_connection
+
+            persistence_ready, persistence_hint = configure_kaggle_drive_connection(
+                workspace,
+                environ=env,
+            )
+        except Exception as exc:
+            persistence_hint = (
+                "Could not stage Kaggle Drive persistence credentials before server launch: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
     os.environ["OMNIVOICE_LOCAL_CACHE_ROOT"] = str(local_cache_base)
     if source_base is not None:
         os.environ["OMNIVOICE_CACHE_SOURCE"] = str(source_base)
@@ -375,6 +391,9 @@ def bootstrap_hosted_runtime(
     print("Bootstrap cache:", "FAST" if bootstrap_fast else "COLD", "-", bootstrap_reason)
     print("Resource cache:", "FAST" if preparation.fast_path else "COLD", "-", preparation.reason)
     print("Exact wheel:", "FAST" if wheel_fast_path else "BUILT")
+    if runtime == "kaggle":
+        print("Workspace persistence credentials:", "READY" if persistence_ready else "NOT READY")
+        print("Workspace persistence note:", persistence_hint)
     print("Local cache:", preparation.local_namespace)
     print("Startup evidence:", evidence_path)
 
@@ -392,6 +411,8 @@ def bootstrap_hosted_runtime(
         "CACHE_PREPARATION": preparation,
         "WHEEL_FAST_PATH": wheel_fast_path,
         "STARTUP_CACHE_EVIDENCE": evidence_path,
+        "WORKSPACE_PERSISTENCE_READY": persistence_ready,
+        "WORKSPACE_PERSISTENCE_HINT": persistence_hint,
         "persist_runtime_cache": persist_runtime_cache,
         "write_workspace_cache_metadata": write_workspace_cache_metadata,
         "Path": Path,
