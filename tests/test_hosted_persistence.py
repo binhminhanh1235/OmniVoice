@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from omnivoice.hosted_persistence import (
@@ -67,6 +68,68 @@ def test_colab_full_workspace_restore_and_sync_covers_voice_project_and_runtime_
     assert not (persistent / "projects" / "video-a").exists()
     assert (persistent / "voices" / "david" / "voice.json").read_text(encoding="utf-8") == "voice-new"
     assert excluded.read_text(encoding="utf-8") == "cache"
+
+
+def test_restore_rebases_queue_and_job_paths_between_colab_and_kaggle(tmp_path):
+    local = tmp_path / "kaggle" / "OmniVoiceStudio"
+    persistent = tmp_path / "drive" / "OmniVoiceStudio"
+    persistent.mkdir(parents=True)
+
+    (persistent / "project-queue.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "items": [
+                    {
+                        "id": "queue-one",
+                        "project_path": "/content/OmniVoiceStudio/projects/video-a",
+                        "project_title": "Video A",
+                        "voice_name": "David",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (persistent / "jobs.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "job-one",
+                        "kind": "generate_project",
+                        "payload": {
+                            "project_path": "/content/OmniVoiceStudio/projects/video-a",
+                        },
+                        "result": {
+                            "audio": "/content/OmniVoiceStudio/projects/video-a/output/final.wav",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    session = HostedWorkspacePersistence(
+        runtime=_runtime("kaggle", local),
+        workspace=local,
+        backend="colab-drive",
+        persistent_root=persistent,
+        interval_seconds=3600,
+    )
+    session.restore()
+
+    queue = json.loads((local / "project-queue.json").read_text(encoding="utf-8"))
+    jobs = json.loads((local / "jobs.json").read_text(encoding="utf-8"))
+    project_path = str((local / "projects" / "video-a").resolve())
+    output_path = str((local / "projects" / "video-a" / "output" / "final.wav").resolve())
+
+    assert queue["items"][0]["project_path"] == project_path
+    assert jobs["jobs"][0]["payload"]["project_path"] == project_path
+    assert jobs["jobs"][0]["result"]["audio"] == output_path
+    assert "Rebased 3 restored queue/job path value(s)" in session.message
 
 
 def test_rclone_restore_precedes_local_to_remote_sync_and_excludes_cache(tmp_path, monkeypatch):
