@@ -1,13 +1,62 @@
 # Data Management
 
-Project Studio exposes **8. Data Management** for two optional maintenance tasks:
+OmniVoice Studio now has two complementary Google Drive workflows:
 
-1. permanently delete one or many local projects;
-2. copy selected Studio data to a Google Drive account chosen at runtime.
+1. **automatic hosted workspace persistence** for keeping the complete Colab/Kaggle Studio state durable across runtime restarts;
+2. **manual Storage & Backup sync** for explicitly copying selected projects and optional supporting data.
 
-## Delete projects
+These workflows share the same rclone/Google Drive transport but have different semantics. Automatic persistence is the durability layer; manual sync remains an explicit backup/export tool.
 
-The delete selector starts empty. Deletion requires the explicit confirmation checkbox.
+## Automatic hosted workspace persistence
+
+Hosted runtimes should keep generation on their fast local SSD while treating external storage as the durable mirror.
+
+### Colab
+
+The maintained Colab notebook mounts Google Drive, executes Studio from `/content/OmniVoiceStudio`, restores from `MyDrive/OmniVoiceStudio`, then mirrors the full durable workspace back to Drive. Direct launcher use also detects mounted Drive and applies the same persistence contract when the notebook does not already own the mirror.
+
+### Kaggle
+
+Kaggle `/kaggle/working` is ephemeral. To make Saved Voice, projects and the rest of Studio state survive a discarded session, configure these **Kaggle Secrets once**:
+
+```text
+OMNIVOICE_GDRIVE_CLIENT_ID
+OMNIVOICE_GDRIVE_CLIENT_SECRET
+OMNIVOICE_GDRIVE_TOKEN_JSON
+```
+
+Optional settings:
+
+```text
+OMNIVOICE_GDRIVE_DESTINATION=OmniVoiceStudio
+OMNIVOICE_PERSISTENCE_INTERVAL_SECONDS=15
+```
+
+The token JSON is the value returned by the normal `rclone authorize drive ...` flow described below. Store the complete JSON object as the Kaggle Secret value.
+
+At each Kaggle start OmniVoice stages those credentials into runtime-only storage, restores the full Studio workspace from Drive **before** model/UI startup, mirrors changes while Studio is running, and performs a final sync on graceful shutdown.
+
+The automatic mirror covers normal Studio state including:
+
+```text
+voices/                  saved voice manifests, encoded prompts and references
+projects/                manifests, Studio settings, section state/history/audio
+artifacts/               Quick Audio and other standalone artifacts
+project-queue.json       Project Queue state
+jobs.json                durable AI-native job state
+hardware-quality.json    quality settings
+advanced-settings.json   advanced settings
+```
+
+Startup cache/evidence, temporary files and NFS scratch files are excluded because they belong to the runtime/cache subsystem rather than user state.
+
+Queue/job paths are rebased after restore, so a workspace mirrored from Colab can resume on Kaggle and vice versa without retaining stale `/content/OmniVoiceStudio/...` or `/kaggle/working/OmniVoiceStudio/...` paths.
+
+If Kaggle persistence secrets are missing, Studio still starts and logs an explicit warning that the workspace is ephemeral. It does not silently claim that local SSD data is durable.
+
+## Manual project deletion
+
+The Storage & Backup surface also supports permanent project deletion. The delete selector starts empty and deletion requires the explicit confirmation checkbox.
 
 Safety rules:
 
@@ -17,21 +66,21 @@ Safety rules:
 - a project whose `section-status.json` still reports a section as `queued` or `generating` cannot be deleted, which also protects direct Generate / Resume jobs outside Project Queue;
 - non-running Project Queue entries for deleted projects are removed so the queue does not keep stale paths.
 
-Deletion is permanent and does not move a project to a trash folder.
+With automatic full-workspace persistence enabled, that deletion is propagated to the persistent mirror on the next sync, so a deliberately deleted project is not resurrected after restart.
 
-## Optional Google Drive sync
+## Manual Google Drive sync
 
-Google Drive sync uses `rclone` and is deliberately optional. OmniVoice does not hard-code a Google account.
+Manual Drive sync uses `rclone` and remains optional. It is useful when you want to copy selected projects without enabling automatic whole-workspace persistence.
 
 ### Runtime rclone installation
 
-If the current Kaggle/Colab runtime does not already have `rclone`, click **Install rclone in this runtime** in Data Management. The installer is opt-in and downloads the official Linux rclone archive for the current architecture, extracts only the `rclone` binary under the runtime temporary directory, marks it executable, adds that temporary bin directory to the current process `PATH`, and verifies it with `rclone version`.
+If the current Kaggle/Colab runtime does not already have `rclone`, click **Install rclone in this runtime** in Storage & Backup. The installer downloads the official Linux rclone archive for the current architecture, extracts only the `rclone` binary under the runtime temporary directory, marks it executable, adds that temporary bin directory to the current process `PATH`, and verifies it with `rclone version`.
 
-It does not modify the repository, Studio workspace, notebook image, or Google Drive. A new hosted runtime can install its own temporary copy again.
+It does not modify the repository, notebook image, or persistent credentials. A new hosted runtime can install its own temporary copy again.
 
-### Account selection
+### Account selection and token creation
 
-Use a Google OAuth Client ID and Client Secret for a Desktop app. In the Data Management tab:
+Use a Google OAuth Client ID and Client Secret for a Desktop app. In Storage & Backup:
 
 1. enter the Client ID and Client Secret;
 2. click **Generate rclone authorize command**;
@@ -42,19 +91,17 @@ Use a Google OAuth Client ID and Client Secret for a Desktop app. In the Data Ma
 7. paste it into **Authorization token JSON**;
 8. click **Connect / replace Google account**.
 
-Running the flow again with another Google login switches the account for the current runtime.
+For one-time Kaggle automatic persistence setup, save the same Client ID, Client Secret and returned token JSON as the three Kaggle Secrets listed above. Future sessions can then reconnect without pasting credentials into Studio again.
 
-The current rclone documentation recommends using your own Google OAuth Client ID because the shared rclone Google Drive client ID is being retired during 2026.
+Running the manual connection flow with another Google login switches the account for the current runtime.
 
 ### Credential storage
 
-OAuth material is never stored in the repository and is not stored inside the Studio workspace. It is written only to a runtime temporary directory with permission `0600` where supported.
-
-This matters for Colab because the Studio workspace may itself live on a mounted Google Drive. Restarting the runtime removes the temporary connection and allows a different Google account to be selected next time.
+OAuth material is never stored in the repository or Studio workspace. Runtime connections are written only to a temporary directory with permission `0600` where supported. Kaggle automatic persistence reads encrypted Kaggle Secrets and stages them into that same runtime-only credential store.
 
 The Drive remote is supplied to each rclone subprocess through environment variables. OAuth client secrets and access/refresh tokens are not placed on the rclone command line.
 
-### What is synced
+### What manual sync copies
 
 Selected projects are copied to:
 
@@ -71,22 +118,10 @@ Optional checkboxes also copy:
 <workspace>/hardware-quality.json  -> <destination>/hardware-quality.json
 ```
 
-Project Queue state and Google OAuth credentials are intentionally not uploaded.
+Manual sync intentionally remains narrower than automatic persistence. Project Queue/jobs and the rest of the workspace are handled by the automatic persistence layer instead.
 
-### Copy semantics
+### Manual copy semantics
 
-Sync uses `rclone copy`, not `rclone sync`.
+Manual sync uses `rclone copy`, not `rclone sync`. New or changed local files are uploaded, while extra files already present on Drive are not deleted. This conservative behavior is appropriate for an explicit backup/export action.
 
-That means new or changed local files are uploaded, but extra files already present on Google Drive are not deleted. This is safer for an optional backup/persistence workflow.
-
-## Kaggle and Colab
-
-For Kaggle/Colab, the normal flow is:
-
-1. click **Install rclone in this runtime** if `rclone` is unavailable;
-2. generate the authorization command in Studio;
-3. run that authorization command on a computer with a browser;
-4. choose the desired Google account and paste the returned token into Studio;
-5. choose one or more projects and click **Sync selected to Google Drive**.
-
-The OAuth authorization step itself should be run on a machine with a browser. This is the normal rclone remote-authorization flow for headless environments such as Kaggle.
+Automatic hosted persistence uses mirror semantics instead, including deletion propagation, because its destination represents the current durable Studio workspace rather than an archival copy.

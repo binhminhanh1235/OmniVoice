@@ -8,8 +8,9 @@ on:
       - "omnivoice/data_management.py"
       - "omnivoice/runtime_rclone.py"
       - "omnivoice/runtime_cache.py"
-      - "omnivoice/hardware_quality.py"
       - "omnivoice/runtime_workspace.py"
+      - "omnivoice/hosted_persistence.py"
+      - "omnivoice/hardware_quality.py"
       - "omnivoice/section_export.py"
       - "omnivoice/artifacts.py"
       - "omnivoice/auth.py"
@@ -82,6 +83,7 @@ on:
       - "tests/test_benchmark.py"
       - "tests/test_adaptive_quality.py"
       - "tests/test_data_management.py"
+      - "tests/test_hosted_persistence.py"
       - "tests/test_hardware_quality.py"
       - "tests/test_runtime_workspace.py"
       - "tests/test_runtime_cache.py"
@@ -198,6 +200,7 @@ jobs:
             tests/test_benchmark.py \
             tests/test_adaptive_quality.py \
             tests/test_data_management.py \
+            tests/test_hosted_persistence.py \
             tests/test_hardware_quality.py \
             tests/test_runtime_workspace.py \
             tests/test_runtime_cache.py \

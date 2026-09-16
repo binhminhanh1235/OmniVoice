@@ -15,6 +15,7 @@ import torch
 
 from omnivoice import OmniVoice
 from omnivoice.hardware_quality import detect_hardware
+from omnivoice.hosted_persistence import prepare_hosted_workspace_persistence
 from omnivoice.lazy_asr import configure_lazy_asr, should_defer_asr_startup
 from omnivoice.runtime_workspace import (
     RuntimeWorkspace,
@@ -151,6 +152,14 @@ def serve(args) -> int:
     import uvicorn
 
     runtime = _runtime_for_workspace(args.workspace)
+    persistence = prepare_hosted_workspace_persistence(runtime, runtime.root)
+    if persistence.available:
+        logger.info("Workspace persistence: %s", persistence.message)
+    elif runtime.ephemeral:
+        logger.warning("Workspace persistence: %s", persistence.message)
+    else:
+        logger.info("Workspace persistence: %s", persistence.message)
+
     hardware = detect_hardware()
     device = args.device or get_best_device()
     public = _public_endpoint(args)
@@ -192,23 +201,29 @@ def serve(args) -> int:
         logger.info("%s", line)
     _announce_endpoints(args, public)
 
-    if not args.tunnel:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-        return 0
+    try:
+        if not args.tunnel:
+            uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+            return 0
 
-    tunnel = CloudflareTunnel(
-        binary=args.cloudflared,
-        token_env=args.tunnel_token_env,
-        loglevel=args.tunnel_loglevel,
-    )
-    logger.info(
-        "Starting Cloudflare Tunnel using token from $%s (token is not placed on the command line).",
-        args.tunnel_token_env,
-    )
-    with tunnel:
-        logger.info("Named tunnel connector is running; starting Studio origin server.")
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-    return 0
+        tunnel = CloudflareTunnel(
+            binary=args.cloudflared,
+            token_env=args.tunnel_token_env,
+            loglevel=args.tunnel_loglevel,
+        )
+        logger.info(
+            "Starting Cloudflare Tunnel using token from $%s (token is not placed on the command line).",
+            args.tunnel_token_env,
+        )
+        with tunnel:
+            logger.info("Named tunnel connector is running; starting Studio origin server.")
+            uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        return 0
+    finally:
+        try:
+            persistence.close()
+        except Exception as exc:
+            logger.warning("Final workspace persistence sync failed: %s: %s", type(exc).__name__, exc)
 
 
 def main(argv=None) -> int:
