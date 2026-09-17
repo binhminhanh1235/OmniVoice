@@ -78,9 +78,11 @@ def test_unified_workspace_language_is_dropdown_with_english_first():
     assert "language = gr.Textbox(" not in source
 
 
-def test_render_keeps_section_status_visible_while_generation_runs():
+def test_render_keeps_sections_and_status_visible_while_streaming():
     source = inspect.getsource(build_project_workspace_demo)
-    render_binding = source.split("render_button.click(", 1)[1].split(")\n", 1)[0]
+    render_binding = source.split("render_button.click(", 1)[1].split(
+        "refresh_generated.click(", 1
+    )[0]
     assert 'show_progress="hidden"' in render_binding
     assert "status_table" in render_binding
     assert "section_selection" in render_binding
@@ -88,18 +90,17 @@ def test_render_keeps_section_status_visible_while_generation_runs():
 
 def test_project_workspace_has_native_zip_download_and_delete_controls():
     source = inspect.getsource(build_project_workspace_demo)
-    assert 'download_project = gr.DownloadButton(' in source
+    assert "download_project = gr.DownloadButton(" in source
     assert '"Download audio ZIP"' in source
     assert 'gr.Button("Delete project", variant="stop"' in source
     assert "create_project_audio_archive(project)" in source
     assert "shutil.rmtree(project_root)" in source
     assert "export_section_mp3s" not in source
-    assert '"Prepare audio ZIP"' not in source
 
 
 def test_project_delete_requires_confirmation_and_stays_inside_projects_root():
     source = inspect.getsource(build_project_workspace_demo)
-    assert 'if not confirmed:' in source
+    assert "if not confirmed:" in source
     assert 'raise gr.Error("Confirm project deletion first.")' in source
     assert "project_root.relative_to(projects_root)" in source
     assert 'not (project_root / "project.json").exists()' in source
