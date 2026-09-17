@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -187,6 +188,23 @@ class ProjectStudioController:
             speak_section_titles=speak_section_titles,
             overwrite=overwrite,
         )
+
+    def delete_project(self, project_path: str | Path) -> str:
+        """Delete one validated Studio project directory and return its title."""
+
+        project = self.load_project(project_path)
+        project_root = project.root.resolve()
+        projects_root = self.projects_root.resolve()
+        try:
+            project_root.relative_to(projects_root)
+        except ValueError as exc:
+            raise ValueError("Refusing to delete a project outside the Studio projects directory") from exc
+        if project_root == projects_root or not (project_root / "project.json").is_file():
+            raise ValueError("Refusing to delete an invalid project directory")
+
+        title = project.manifest.title
+        shutil.rmtree(project_root)
+        return title
 
     def load_project(self, project_path: str | Path) -> OmniVoiceProject:
         path = Path(project_path).expanduser()
@@ -384,428 +402,279 @@ def build_demo(model: Any, workspace: str | Path):
         "Unverified",
         "Status",
     ]
-    parse_headers = ["Section", "Title", "Style", "Planned", "Beats", "Chunks"]
 
-    def refresh_voices():
-        names = controller.voices.voice_names()
-        value = names[0] if names else None
-        variants = controller.voices.variant_choices(value) if value else []
+    projects = controller.list_projects()
+    voices = controller.voices.voice_names()
+    initial_project = projects[0] if projects else None
+    initial_voice = voices[0] if voices else None
+    initial_variants = controller.voices.variant_choices(initial_voice) if initial_voice else []
+    initial_rows = controller.project_view(initial_project)[0] if initial_project else []
+    initial_sections = controller.project_view(initial_project)[2] if initial_project else []
+
+    def refresh():
+        items = controller.list_projects()
+        voices_now = controller.voices.voice_names()
+        selected = items[0] if items else None
+        selected_voice = voices_now[0] if voices_now else None
+        variants = controller.voices.variant_choices(selected_voice) if selected_voice else []
+        rows = controller.project_view(selected)[0] if selected else []
+        sections = controller.project_view(selected)[2] if selected else []
         return (
-            gr.update(choices=names, value=value),
+            gr.update(choices=items, value=selected),
+            gr.update(choices=voices_now, value=selected_voice),
             gr.update(choices=variants, value=("AUTO" if variants else None)),
-            f"Found {len(names)} saved voices.",
+            rows,
+            gr.update(choices=sections, value=(sections[0] if sections else None)),
+            "Ready.",
         )
 
-    def voice_variants(name):
+    def variants_for_voice(name):
         variants = controller.voices.variant_choices(name) if name else []
-        return gr.update(
-            choices=variants,
-            value=("AUTO" if variants else None),
-        )
+        return gr.update(choices=variants, value=("AUTO" if variants else None))
 
-    def add_voice(name, variant, audio, ref_text, language):
-        if not audio:
-            raise gr.Error("Upload a reference audio first.")
-        message = controller.create_voice(
-            name=name,
-            reference_audio=audio,
-            ref_text=ref_text,
-            variant=variant or "DEFAULT",
-            language=language or None,
-        )
-        names = controller.voices.voice_names()
-        variants = controller.voices.variant_choices(name)
-        return (
-            gr.update(choices=names, value=name),
-            gr.update(choices=variants, value="AUTO"),
-            message,
-        )
+    def load_project_view(project_path):
+        if not project_path:
+            return [], gr.update(choices=[], value=None), None
+        rows, _, sections = controller.project_view(project_path)
+        first = sections[0] if sections else None
+        audio = str(controller.section_audio(project_path, first)) if first else None
+        return rows, gr.update(choices=sections, value=first), audio
 
-    def parse_script(script, speak_titles):
-        try:
-            rows, message = controller.parse_script(
-                script,
-                speak_section_titles=bool(speak_titles),
-            )
-            return rows, message
-        except Exception as exc:
-            return [], f"Parse error: {type(exc).__name__}: {exc}"
-
-    def refresh_projects():
-        projects = controller.list_projects()
-        value = projects[0] if projects else None
-        return gr.update(choices=projects, value=value), f"Found {len(projects)} projects."
-
-    def create_project(script, speak_titles, overwrite):
+    def create_project(script, speak_titles, replace_existing):
         try:
             project = controller.create_project(
                 script,
                 speak_section_titles=bool(speak_titles),
-                overwrite=bool(overwrite),
+                overwrite=bool(replace_existing),
             )
-            projects = controller.list_projects()
-            rows, chunks, sections = controller.project_view(project.root)
-            title_suffix = " Titles will be spoken." if speak_titles else ""
-            return (
-                str(project.root),
-                gr.update(choices=projects, value=str(project.root)),
-                rows,
-                gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
-                gr.update(choices=sections, value=(sections[0] if sections else None)),
-                f"Created project: {project.manifest.title}.{title_suffix}",
+        except FileExistsError as exc:
+            raise gr.Error(
+                "A project with this title already exists. Enable Replace existing project "
+                "only when you intend to rebuild it. " + str(exc)
             )
-        except Exception as exc:
-            return (
-                "",
-                gr.update(),
-                [],
-                gr.update(choices=[], value=None),
-                gr.update(choices=[], value=None),
-                f"Create error: {type(exc).__name__}: {exc}",
-            )
+        items = controller.list_projects()
+        rows, _, sections = controller.project_view(project.root)
+        return (
+            gr.update(choices=items, value=str(project.root)),
+            rows,
+            gr.update(choices=sections, value=(sections[0] if sections else None)),
+            f"Created {project.manifest.title}",
+        )
 
-    def load_project(path):
-        if not path:
-            return "", [], gr.update(choices=[]), gr.update(choices=[]), "Select a project."
-        try:
-            project = controller.load_project(path)
-            rows, chunks, sections = controller.project_view(project.root)
-            settings = controller.load_project_settings(project)
-            suffix = ""
-            if settings:
-                suffix = (
-                    f" Saved voice={settings.get('voice_name')}, "
-                    f"variant={settings.get('voice_variant')}."
-                )
-            return (
-                str(project.root),
-                rows,
-                gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
-                gr.update(choices=sections, value=(sections[0] if sections else None)),
-                f"Loaded {project.manifest.title}.{suffix}",
-            )
-        except Exception as exc:
-            return "", [], gr.update(choices=[]), gr.update(choices=[]), (
-                f"Load error: {type(exc).__name__}: {exc}"
-            )
-
-    def generate_project(path, voice, variant, language, sections, resume, strict):
-        if not path:
-            return [], gr.update(), gr.update(), "Create/load a project first."
+    def generate(project_path, voice_name, variant, language, sections, resume, strict):
         try:
             project = controller.generate(
-                path,
-                voice_name=voice,
-                voice_variant=variant or "AUTO",
+                project_path,
+                voice_name=voice_name,
+                voice_variant=variant,
                 language=language or None,
                 section_ids=_split_section_ids(sections),
                 resume=bool(resume),
                 strict=bool(strict),
             )
-            rows, chunks, section_audio = controller.project_view(project.root)
-            verified = sum(row[-1] == "verified" for row in rows)
-            return (
-                rows,
-                gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
-                gr.update(
-                    choices=section_audio,
-                    value=(section_audio[0] if section_audio else None),
-                ),
-                f"Generation finished. {verified}/{len(rows)} sections verified.",
-            )
         except Exception as exc:
-            logger.exception("Project generation failed")
-            return [], gr.update(), gr.update(), f"Generate error: {type(exc).__name__}: {exc}"
+            raise gr.Error(f"Generation failed: {type(exc).__name__}: {exc}")
+        rows, _, generated = controller.project_view(project.root)
+        first = generated[0] if generated else None
+        audio = str(controller.section_audio(project.root, first)) if first else None
+        return rows, gr.update(choices=generated, value=first), audio, "Generation complete."
 
-    def regenerate(path, chunk, voice, variant, language, strict):
+    def regenerate(project_path, chunk, voice_name, variant, language, strict):
         try:
             project = controller.regenerate_chunk(
-                path,
+                project_path,
                 chunk,
-                voice_name=voice,
-                voice_variant=variant or "AUTO",
+                voice_name=voice_name,
+                voice_variant=variant,
                 language=language or None,
                 strict=bool(strict),
             )
-            rows, chunks, section_audio = controller.project_view(project.root)
-            return (
-                rows,
-                gr.update(choices=chunks, value=chunk),
-                gr.update(
-                    choices=section_audio,
-                    value=(section_audio[0] if section_audio else None),
-                ),
-                f"Regenerated {chunk.split(' ', 1)[0]}.",
-            )
         except Exception as exc:
-            logger.exception("Chunk regeneration failed")
-            return [], gr.update(), gr.update(), f"Regenerate error: {type(exc).__name__}: {exc}"
+            raise gr.Error(f"Regeneration failed: {type(exc).__name__}: {exc}")
+        rows, chunks, generated = controller.project_view(project.root)
+        first = generated[0] if generated else None
+        audio = str(controller.section_audio(project.root, first)) if first else None
+        return (
+            rows,
+            gr.update(choices=chunks, value=(chunks[0] if chunks else None)),
+            gr.update(choices=generated, value=first),
+            audio,
+            "Chunk regenerated.",
+        )
 
-    def play_section(path, section_id):
-        if not path or not section_id:
-            return None
+    def merge(project_path, require_verified):
         try:
-            return str(controller.section_audio(path, section_id))
+            output = controller.merge_project(project_path, require_verified=bool(require_verified))
         except Exception as exc:
-            raise gr.Error(str(exc))
-
-    def merge(path, allow_unverified):
-        try:
-            output = controller.merge_project(
-                path,
-                require_verified=not bool(allow_unverified),
-            )
-            return str(output), f"Merged: {output}"
-        except Exception as exc:
-            return None, f"Merge error: {type(exc).__name__}: {exc}"
-
-    initial_voice_names = controller.voices.voice_names()
-    initial_voice = initial_voice_names[0] if initial_voice_names else None
-    initial_variants = (
-        controller.voices.variant_choices(initial_voice)
-        if initial_voice
-        else []
-    )
+            raise gr.Error(f"Merge failed: {type(exc).__name__}: {exc}")
+        return str(output), f"Merged: {output}"
 
     with gr.Blocks(title="OmniVoice Project Studio") as demo:
         gr.Markdown(
             "# OmniVoice Project Studio\n"
-            "Paste the full script, keep `[WARM]`, `[SOFT]`, `[EMPHASIZE]` as "
-            "directives, and generate/checkpoint each Sxx section independently.\n\n"
-            "**Voice Style Bank:** choose `AUTO` to let each beat select a matching "
-            "saved voice variant. Example: `[WARM]` uses `WARM` when available, "
-            "then falls back safely to `DEFAULT`."
+            "Create a project from markdown, pick a saved voice/style bank, generate sections, "
+            "inspect status, regenerate failed chunks, and merge final audio."
         )
-        project_state = gr.State("")
 
-        with gr.Tab("1. Voice Library"):
-            gr.Markdown(
-                "Save the same narrator more than once with variants such as "
-                "`DEFAULT`, `WARM`, `SOFT`, or `EMPHASIZE`."
+        with gr.Row():
+            refresh_button = gr.Button("Refresh Projects / Voices")
+            project = gr.Dropdown(
+                label="Project",
+                choices=projects,
+                value=initial_project,
             )
-            with gr.Row():
-                voice_name = gr.Textbox(label="Voice name", placeholder="Warm American Male")
-                voice_variant_new = gr.Textbox(label="Variant", value="DEFAULT")
-                voice_language_new = gr.Dropdown(
-                    label="Language",
-                    choices=_LANGUAGE_CHOICES,
-                    value="en",
-                    allow_custom_value=False,
-                    interactive=True,
-                    info="English is first; select the reference language.",
-                )
-            reference_audio = gr.Audio(label="Reference audio (3–10s)", type="filepath")
-            reference_text = gr.Textbox(
-                label="Exact reference transcript (recommended)",
-                lines=3,
-            )
-            add_voice_button = gr.Button("Save Voice / Variant", variant="primary")
-            refresh_voice_button = gr.Button("Refresh Voice Library")
-            voice_message = gr.Markdown()
 
-        with gr.Tab("2. Project"):
+        with gr.Accordion("Create project", open=not bool(projects)):
             script = gr.Textbox(
-                label="Full Markdown script",
-                lines=22,
-                placeholder="# Title\n\n## S01 — 0:00–0:45\n\n[WARM] Narration...",
+                label="Project markdown",
+                lines=16,
+                placeholder="# Title\n\n## S01 — 0:00–0:45\n### Opening\n[WARM] Narration...",
             )
             with gr.Row():
-                parse_button = gr.Button("Parse Script")
-                create_button = gr.Button("Create Project", variant="primary")
-                speak_section_titles = gr.Checkbox(
+                speak_titles = gr.Checkbox(
                     label="Read section titles (###)",
                     value=False,
-                    info="When enabled, each ### title becomes the first spoken beat of its section.",
+                    info="When disabled, headings are metadata only and are not spoken.",
                 )
-                overwrite = gr.Checkbox(label="Overwrite same project", value=False)
-            parse_table = gr.Dataframe(headers=parse_headers, interactive=False)
-            parse_message = gr.Markdown()
-
-            with gr.Row():
-                project_picker = gr.Dropdown(
-                    label="Saved project",
-                    choices=controller.list_projects(),
-                )
-                refresh_project_button = gr.Button("Refresh Projects")
-                load_project_button = gr.Button("Load Project")
-
-        with gr.Tab("3. Generate / Resume"):
-            with gr.Row():
-                saved_voice = gr.Dropdown(
-                    label="Voice",
-                    choices=initial_voice_names,
-                    value=initial_voice,
-                )
-                saved_variant = gr.Dropdown(
-                    label="Voice variant",
-                    info="AUTO follows [WARM]/[SOFT]/... tags; a concrete variant locks the project.",
-                    choices=initial_variants,
-                    value=("AUTO" if initial_variants else None),
-                )
-                language = gr.Dropdown(
-                    label="Language",
-                    choices=_LANGUAGE_CHOICES,
-                    value="en",
-                    allow_custom_value=False,
-                    interactive=True,
-                    info="English is first; select another supported language when needed.",
-                )
-            sections = gr.Textbox(
-                label="Sections (optional)",
-                placeholder="S03,S07,S10 - empty means all",
-            )
-            with gr.Row():
-                resume = gr.Checkbox(label="Resume / skip verified chunks", value=True)
-                strict = gr.Checkbox(label="Exact mode: reject unverified chunks", value=False)
-                generate_button = gr.Button("Generate / Resume", variant="primary")
-            status_table = gr.Dataframe(headers=status_headers, interactive=False)
-
-            with gr.Row():
-                chunk_picker = gr.Dropdown(label="Chunk to regenerate", choices=[])
-                regenerate_button = gr.Button("Regenerate selected chunk")
-
-            with gr.Row():
-                section_audio_picker = gr.Dropdown(label="Generated section", choices=[])
-                play_section_button = gr.Button("Play section")
-            section_audio = gr.Audio(label="Section audio", type="filepath")
-
-            with gr.Row():
-                allow_unverified = gr.Checkbox(
-                    label="Allow merge with unverified sections",
+                replace_existing = gr.Checkbox(
+                    label="Replace existing project",
                     value=False,
+                    info="Destructive: removes the existing project directory for the same title before rebuilding it.",
                 )
-                merge_button = gr.Button("Merge full.wav")
-            merged_audio = gr.Audio(label="Merged project audio", type="filepath")
-            action_message = gr.Markdown()
+                analyze_button = gr.Button("Analyze script")
+                create_button = gr.Button("Create project", variant="primary")
+            parse_table = gr.Dataframe(
+                headers=["Section", "Title", "Style", "Planned", "Beats", "Chunks"],
+                interactive=False,
+                wrap=True,
+            )
+            parse_status = gr.Markdown()
 
-        refresh_voice_button.click(
-            refresh_voices,
-            outputs=[saved_voice, saved_variant, voice_message],
+        with gr.Row():
+            voice = gr.Dropdown(label="Voice", choices=voices, value=initial_voice)
+            variant = gr.Dropdown(
+                label="Voice variant",
+                choices=initial_variants,
+                value=("AUTO" if initial_variants else None),
+            )
+            language = gr.Dropdown(
+                label="Language",
+                choices=_LANGUAGE_CHOICES,
+                value="en",
+                allow_custom_value=False,
+                interactive=True,
+                info="English is first; select another supported language when needed.",
+            )
+
+        sections = gr.Textbox(
+            label="Sections (optional)",
+            placeholder="S03,S07,S10 - empty means all",
         )
-        saved_voice.change(voice_variants, inputs=saved_voice, outputs=saved_variant)
-        add_voice_button.click(
-            add_voice,
-            inputs=[
-                voice_name,
-                voice_variant_new,
-                reference_audio,
-                reference_text,
-                voice_language_new,
-            ],
-            outputs=[saved_voice, saved_variant, voice_message],
+
+        with gr.Row():
+            resume = gr.Checkbox(label="Resume / skip verified chunks", value=True)
+            strict = gr.Checkbox(label="Exact mode: reject unverified chunks", value=False)
+            generate_button = gr.Button("Generate / Resume", variant="primary")
+
+        status = gr.Markdown("Ready.")
+        status_table = gr.Dataframe(
+            value=initial_rows,
+            headers=status_headers,
+            interactive=False,
+            wrap=True,
         )
-        parse_button.click(
-            parse_script,
-            inputs=[script, speak_section_titles],
-            outputs=[parse_table, parse_message],
+
+        with gr.Row():
+            section_picker = gr.Dropdown(
+                label="Generated section",
+                choices=initial_sections,
+                value=(initial_sections[0] if initial_sections else None),
+            )
+            play_button = gr.Button("Play section")
+        section_audio = gr.Audio(label="Section audio", type="filepath")
+
+        chunk_picker = gr.Dropdown(label="Chunk to regenerate", choices=[])
+        regenerate_button = gr.Button("Regenerate selected chunk")
+
+        require_verified = gr.Checkbox(label="Require verified sections before merge", value=True)
+        merge_button = gr.Button("Merge full.wav", variant="primary")
+        merged_audio = gr.Audio(label="Merged project", type="filepath")
+
+        refresh_button.click(
+            refresh,
+            outputs=[project, voice, variant, status_table, section_picker, status],
         )
-        refresh_project_button.click(
-            refresh_projects,
-            outputs=[project_picker, parse_message],
+        project.change(
+            load_project_view,
+            inputs=project,
+            outputs=[status_table, section_picker, section_audio],
+        )
+        voice.change(variants_for_voice, inputs=voice, outputs=variant)
+        analyze_button.click(
+            controller.parse_script,
+            inputs=[script, speak_titles],
+            outputs=[parse_table, parse_status],
         )
         create_button.click(
             create_project,
-            inputs=[script, speak_section_titles, overwrite],
-            outputs=[
-                project_state,
-                project_picker,
-                status_table,
-                chunk_picker,
-                section_audio_picker,
-                action_message,
-            ],
-        )
-        load_project_button.click(
-            load_project,
-            inputs=project_picker,
-            outputs=[
-                project_state,
-                status_table,
-                chunk_picker,
-                section_audio_picker,
-                action_message,
-            ],
+            inputs=[script, speak_titles, replace_existing],
+            outputs=[project, status_table, section_picker, status],
         )
         generate_button.click(
-            generate_project,
-            inputs=[
-                project_state,
-                saved_voice,
-                saved_variant,
-                language,
-                sections,
-                resume,
-                strict,
-            ],
-            outputs=[status_table, chunk_picker, section_audio_picker, action_message],
+            generate,
+            inputs=[project, voice, variant, language, sections, resume, strict],
+            outputs=[status_table, section_picker, section_audio, status],
+        )
+        play_button.click(
+            controller.section_audio,
+            inputs=[project, section_picker],
+            outputs=section_audio,
+        )
+        section_picker.change(
+            lambda project_path, section_id: (
+                gr.update(choices=controller.project_view(project_path)[1], value=None)
+                if project_path and section_id
+                else gr.update(choices=[], value=None)
+            ),
+            inputs=[project, section_picker],
+            outputs=chunk_picker,
         )
         regenerate_button.click(
             regenerate,
-            inputs=[
-                project_state,
-                chunk_picker,
-                saved_voice,
-                saved_variant,
-                language,
-                strict,
-            ],
-            outputs=[status_table, chunk_picker, section_audio_picker, action_message],
-        )
-        play_section_button.click(
-            play_section,
-            inputs=[project_state, section_audio_picker],
-            outputs=section_audio,
+            inputs=[project, chunk_picker, voice, variant, language, strict],
+            outputs=[status_table, chunk_picker, section_picker, section_audio, status],
         )
         merge_button.click(
             merge,
-            inputs=[project_state, allow_unverified],
-            outputs=[merged_audio, action_message],
+            inputs=[project, require_verified],
+            outputs=[merged_audio, status],
         )
 
     return demo
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Launch OmniVoice Project Studio")
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="OmniVoice Project Studio")
     parser.add_argument("--model", default="k2-fsa/OmniVoice")
     parser.add_argument("--device", default=None)
     parser.add_argument("--workspace", default=str(default_workspace()))
-    parser.add_argument("--asr-model", default="openai/whisper-small.en")
-    parser.add_argument("--asr-device", default="cpu")
     parser.add_argument("--ip", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
-    parser.add_argument("--share", action="store_true", default=False)
-    return parser
-
-
-def main(argv=None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
-    )
-    parser = build_parser()
+    parser.add_argument("--share", action="store_true")
     args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO)
     device = args.device or get_best_device()
-    logger.info(
-        "Loading OmniVoice model=%s device=%s ASR=%s on %s",
-        args.model,
-        device,
-        args.asr_model,
-        args.asr_device,
-    )
     model = OmniVoice.from_pretrained(
         args.model,
         device_map=device,
         dtype=torch.float16,
-        load_asr=True,
-        asr_model_name=args.asr_model,
-        asr_device=args.asr_device,
     )
-    demo = build_demo(model, args.workspace)
-    demo.queue().launch(
+    build_demo(model, args.workspace).queue().launch(
         server_name=args.ip,
         server_port=args.port,
         share=args.share,
+        show_error=True,
     )
     return 0
 
