@@ -25,12 +25,11 @@ from omnivoice.cli.project_studio_quality import (
     install_quality_controller,
 )
 from omnivoice.cli.project_workspace import build_project_workspace_demo
-from omnivoice.cli.section_export_ui import build_section_export_demo
-from omnivoice.cli.section_history_ui import build_section_history_demo
 from omnivoice.cli.standalone_audio_ui import build_standalone_audio_demo
 from omnivoice.cli.text_doctor_ui import build_text_doctor_demo
 from omnivoice.cli.unified_controller import UnifiedWorkspaceController
 from omnivoice.cli.voice_doctor_ui import build_voice_doctor_demo
+from omnivoice.cli.section_history_ui import build_section_history_demo
 from omnivoice.hardware_quality import detect_hardware
 from omnivoice.hosted_persistence import prepare_hosted_workspace_persistence
 from omnivoice.lazy_asr import configure_lazy_asr, should_defer_asr_startup
@@ -93,19 +92,14 @@ def build_demo(model, workspace: str | Path):
         workspace,
         controller_cls=UnifiedWorkspaceController,
     )
-    downloads = build_section_export_demo(
-        model,
-        workspace,
-        controller_cls=UnifiedWorkspaceController,
-    )
     data_management = build_data_management_demo(
         model,
         workspace,
         controller_cls=UnifiedWorkspaceController,
     )
     settings = gr.TabbedInterface(
-        [hardware, advanced, downloads, data_management],
-        ["Hardware & Quality", "Advanced", "Export", "Storage & Backup"],
+        [hardware, advanced, data_management],
+        ["Hardware & Quality", "Advanced", "Storage & Backup"],
         title="Settings",
     )
 
