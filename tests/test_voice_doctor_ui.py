@@ -5,7 +5,10 @@ import soundfile as sf
 import torch
 
 from omnivoice import VoiceClonePrompt
-from omnivoice.cli.standalone_audio_ui import standalone_audio_payload
+from omnivoice.cli.standalone_audio_ui import (
+    standalone_audio_payload,
+    standalone_audio_status,
+)
 from omnivoice.cli.voice_doctor_ui import (
     build_voice_doctor_demo,
     save_voice_reference,
@@ -124,6 +127,40 @@ def test_quick_audio_payload_is_project_independent_and_normalized():
         "quality_preset": "BALANCED",
     }
     assert "project" not in " ".join(payload.keys()).lower()
+
+
+def test_quick_audio_status_reports_verified_chunks():
+    status = standalone_audio_status(
+        {
+            "verified": True,
+            "chunk_count": 7,
+            "unverified_chunks": 0,
+            "voice_name": "Narrator",
+            "voice_variant": "WARM",
+            "quality_preset": "BALANCED",
+        }
+    )
+
+    assert "ASR verified" in status
+    assert "**7** semantic chunk(s)" in status
+    assert "Needs review" not in status
+
+
+def test_quick_audio_status_does_not_hide_failed_verification():
+    status = standalone_audio_status(
+        {
+            "verified": False,
+            "chunk_count": 7,
+            "unverified_chunks": 2,
+            "voice_name": "Narrator",
+            "voice_variant": "WARM",
+            "quality_preset": "BALANCED",
+        }
+    )
+
+    assert "Needs review" in status
+    assert "2/7 chunk(s)" in status
+    assert "SAFE" in status
 
 
 def test_primary_studio_exposes_quick_audio_as_top_level_tab():
