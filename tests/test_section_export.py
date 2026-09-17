@@ -8,6 +8,7 @@ import soundfile as sf
 from omnivoice.cli.section_export_ui import build_section_export_demo
 from omnivoice.project import OmniVoiceProject
 from omnivoice.section_export import (
+    create_project_audio_archive,
     create_section_mp3_archive,
     export_section_mp3s,
     section_ids,
@@ -84,6 +85,57 @@ def test_download_all_archive_contains_only_selected_project_mp3s(tmp_path):
     outside.write_bytes(b"not-project-audio")
     with pytest.raises(ValueError, match="outside project MP3 exports"):
         create_section_mp3_archive(project, [first, outside])
+
+
+def test_project_audio_zip_archives_original_section_files_without_merge(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    expected = {
+        "S01": b"original-wave-one",
+        "S02": b"original-wave-two",
+    }
+    for section_id, payload in expected.items():
+        section = project.get_section(section_id)
+        wav_path = project.root / "sections" / section_id / f"{section_id}.wav"
+        wav_path.write_bytes(payload)
+        section.audio_file = str(wav_path.relative_to(project.root))
+    project.save()
+
+    result = create_project_audio_archive(project)
+
+    assert result.archive.name == f"{project.root.name}-section-audio.zip"
+    assert result.included == ("S01", "S02")
+    assert result.skipped == ()
+    with zipfile.ZipFile(result.archive) as bundle:
+        assert bundle.namelist() == ["S01.wav", "S02.wav"]
+        assert bundle.read("S01.wav") == expected["S01"]
+        assert bundle.read("S02.wav") == expected["S02"]
+
+
+def test_project_audio_zip_skips_missing_sections_and_rejects_external_audio(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+
+    section = project.get_section("S01")
+    wav_path = project.root / "sections" / "S01" / "S01.wav"
+    wav_path.write_bytes(b"generated")
+    section.audio_file = str(wav_path.relative_to(project.root))
+    project.save()
+
+    result = create_project_audio_archive(project)
+    assert result.included == ("S01",)
+    assert result.skipped == ("S02: no generated section audio",)
+
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"outside")
+    section.audio_file = str(outside)
+    project.save()
+    with pytest.raises(ValueError, match="outside the project root"):
+        create_project_audio_archive(project)
+
+
+def test_project_audio_zip_requires_at_least_one_generated_section(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    with pytest.raises(ValueError, match="no generated section audio"):
+        create_project_audio_archive(project)
 
 
 def test_export_rejects_empty_or_unknown_selection(tmp_path):
