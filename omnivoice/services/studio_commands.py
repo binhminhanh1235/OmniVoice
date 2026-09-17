@@ -12,6 +12,7 @@ single-worker job lifecycle.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,6 +21,7 @@ import soundfile as sf
 from omnivoice.artifacts import ArtifactCatalog
 from omnivoice.preview import generate_project_previews
 from omnivoice.project_status import summarize_project
+from omnivoice.robust_longform import generate_robust_longform
 from omnivoice.section_status import incomplete_section_ids
 from omnivoice.services.job_manager import JobContext
 
@@ -132,6 +134,7 @@ class StudioCommandService:
         instruct = str(payload.get("instruct") or "").strip() or None
         speed_value = payload.get("speed")
         speed = float(speed_value) if speed_value is not None else None
+        strict = bool(payload.get("strict", False))
         requested_quality = payload.get("quality_preset")
         if requested_quality is None:
             requested_quality = "FAST" if preview else self.controller.workspace_quality_preset()
@@ -160,24 +163,33 @@ class StudioCommandService:
         ctx.checkpoint()
 
         generation_config = self.controller.generation_config(quality_preset)
-        audios = self.model.generate(
-            text=text,
+        robust_config = self.controller.robust_config(
+            strict=strict,
+            quality_preset=quality_preset,
+        )
+        generated = generate_robust_longform(
+            self.model,
+            text,
+            robust_config=robust_config,
+            generation_config=generation_config,
             language=language,
             voice_clone_prompt=voice_prompt,
             instruct=instruct,
             speed=speed,
-            generation_config=generation_config,
         )
-        if not audios:
+        audio = generated.audio
+        if not audio.size:
             raise RuntimeError("OmniVoice returned no audio")
 
+        verified = generated.all_verified
+        unverified_chunks = sum(not report.accepted for report in generated.reports)
         category = "previews" if preview else "audio"
         output_dir = self.workspace / "artifacts" / category
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{ctx.job_id}.wav"
         sf.write(
             output_path,
-            audios[0],
+            audio,
             int(self.model.sampling_rate),
             subtype="PCM_16",
         )
@@ -195,17 +207,30 @@ class StudioCommandService:
                 "style": style,
                 "instruct": instruct,
                 "speed": speed,
+                "strict": strict,
+                "verified": verified,
+                "chunk_count": len(generated.chunks),
+                "unverified_chunks": unverified_chunks,
+                "chunks": generated.chunks,
+                "chunk_reports": [asdict(report) for report in generated.reports],
             },
         )
         artifact = self.artifacts.describe(
             output_path,
             kind="preview_audio" if preview else "generated_audio",
         )
+        ready_label = "Preview audio" if preview else "Standalone audio"
+        quality_label = "ASR-verified" if verified else "ready but needs review"
         ctx.emit(
-            "Preview audio ready." if preview else "Standalone audio ready.",
+            f"{ready_label} {quality_label}.",
             progress=1.0,
             event="audio.finished",
-            data={"artifact_id": artifact["id"]},
+            data={
+                "artifact_id": artifact["id"],
+                "verified": verified,
+                "chunk_count": len(generated.chunks),
+                "unverified_chunks": unverified_chunks,
+            },
         )
         return {
             "artifact": artifact,
@@ -214,6 +239,9 @@ class StudioCommandService:
             "voice_variant": resolution.variant if resolution else None,
             "quality_preset": quality_preset,
             "preview": preview,
+            "verified": verified,
+            "chunk_count": len(generated.chunks),
+            "unverified_chunks": unverified_chunks,
         }
 
     def generate_audio_job(self, ctx: JobContext) -> dict[str, Any]:
