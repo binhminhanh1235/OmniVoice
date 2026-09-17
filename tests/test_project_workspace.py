@@ -78,6 +78,16 @@ def test_unified_workspace_language_is_dropdown_with_english_first():
     assert "language = gr.Textbox(" not in source
 
 
+def test_render_keeps_sections_and_status_visible_while_streaming():
+    source = inspect.getsource(build_project_workspace_demo)
+    render_binding = source.split("render_button.click(", 1)[1].split(
+        "refresh_generated.click(", 1
+    )[0]
+    assert 'show_progress="hidden"' in render_binding
+    assert "status_table" in render_binding
+    assert "section_selection" in render_binding
+
+
 def test_primary_launcher_imports_after_navigation_consolidation():
     from omnivoice.cli import project_studio_voice_doctor as launcher
 
