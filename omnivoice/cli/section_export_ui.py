@@ -2,7 +2,7 @@
 # Copyright 2026 OmniVoice contributors
 # Licensed under the Apache License, Version 2.0
 
-"""Gradio UI for exporting Project Studio sections as individual MP3 files."""
+"""Gradio UI for downloading generated Project Studio section audio."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 
 from omnivoice.cli.project_studio import ProjectStudioController
 from omnivoice.section_export import (
+    create_project_audio_archive,
     create_section_mp3_archive,
     export_section_mp3s,
     section_ids,
@@ -41,7 +42,7 @@ def build_section_export_demo(
         )
         return ids, generated, len(ids)
 
-    def reset_download_all():
+    def reset_download():
         return gr.update(value=None, visible=False)
 
     projects = project_items()
@@ -53,7 +54,8 @@ def build_section_export_demo(
             return (
                 gr.update(choices=[], value=[]),
                 [],
-                reset_download_all(),
+                reset_download(),
+                reset_download(),
                 "Select a project.",
             )
         try:
@@ -61,7 +63,8 @@ def build_section_export_demo(
             return (
                 gr.update(choices=ids, value=ids),
                 [],
-                reset_download_all(),
+                reset_download(),
+                reset_download(),
                 f"Selected all **{total}** sections by default · generated audio available for **{generated}/{total}**.",
             )
         except Exception as exc:
@@ -82,7 +85,8 @@ def build_section_export_demo(
             gr.update(choices=items, value=selected),
             gr.update(choices=ids, value=ids),
             [],
-            reset_download_all(),
+            reset_download(),
+            reset_download(),
             message,
         )
 
@@ -93,6 +97,26 @@ def build_section_export_demo(
     def clear_selection(project_path):
         ids, _, _ = selection_for(project_path)
         return gr.update(choices=ids, value=[])
+
+    def prepare_project_zip(project_path):
+        if not project_path:
+            raise gr.Error("Select a project first.")
+        try:
+            project = controller.load_project(project_path)
+            result = create_project_audio_archive(project)
+        except Exception as exc:
+            raise gr.Error(f"Project audio ZIP failed: {type(exc).__name__}: {exc}")
+
+        message = (
+            f"Prepared project audio ZIP with **{len(result.included)}** generated section file(s). "
+            "Files are archived as-is; no merge or audio re-encoding was performed."
+        )
+        if result.skipped:
+            message += " Skipped: " + "; ".join(result.skipped) + "."
+        return (
+            gr.update(value=str(result.archive), visible=True),
+            message,
+        )
 
     def prepare_downloads(project_path, selected_sections):
         if not project_path:
@@ -126,11 +150,12 @@ def build_section_export_demo(
             message += " Generate the selected sections first, then try again."
         return files, download_all, message
 
-    with gr.Blocks(title="Section MP3 Downloads") as demo:
+    with gr.Blocks(title="Project Audio Downloads") as demo:
         gr.Markdown(
-            "# Download section MP3 files\n"
-            "Choose a project, keep all sections checked or uncheck the ones you do not need, "
-            "then prepare individual MP3 files. Original WAV/checkpoint/history files are untouched."
+            "# Download project audio\n"
+            "Download all currently generated section audio in one ZIP without merging the project. "
+            "The original section audio is copied into the archive as-is, so this is fast and does not "
+            "re-encode or modify checkpoints/history."
         )
 
         with gr.Row():
@@ -142,6 +167,30 @@ def build_section_export_demo(
             )
             refresh = gr.Button("Refresh projects")
 
+        with gr.Row():
+            project_zip_button = gr.Button(
+                "Prepare project audio ZIP",
+                variant="primary",
+            )
+            project_zip_download = gr.DownloadButton(
+                "Download project audio ZIP",
+                value=None,
+                visible=False,
+                variant="primary",
+            )
+
+        status = gr.Markdown(
+            (
+                f"Generated audio available for **{initial_generated}/{initial_total}** sections."
+            )
+            if initial_project
+            else "No projects found."
+        )
+
+        gr.Markdown(
+            "## Optional MP3 export\n"
+            "If you want converted MP3 files instead, choose individual sections below."
+        )
         sections = gr.CheckboxGroup(
             label="Sections to download as MP3",
             choices=initial_sections,
@@ -151,21 +200,12 @@ def build_section_export_demo(
         with gr.Row():
             all_button = gr.Button("Select all")
             none_button = gr.Button("Clear")
-            export_button = gr.Button("Prepare selected MP3s", variant="primary")
+            export_button = gr.Button("Prepare selected MP3s")
 
-        status = gr.Markdown(
-            (
-                f"Selected all **{initial_total}** sections by default · generated audio available "
-                f"for **{initial_generated}/{initial_total}**."
-            )
-            if initial_project
-            else "No projects found."
-        )
         download_all = gr.DownloadButton(
-            "Download all selected",
+            "Download all selected MP3s",
             value=None,
             visible=False,
-            variant="primary",
         )
         files = gr.Files(
             label="MP3 files",
@@ -176,11 +216,23 @@ def build_section_export_demo(
         project.change(
             show_project,
             inputs=project,
-            outputs=[sections, files, download_all, status],
+            outputs=[sections, files, download_all, project_zip_download, status],
         )
         refresh.click(
             refresh_projects,
-            outputs=[project, sections, files, download_all, status],
+            outputs=[
+                project,
+                sections,
+                files,
+                download_all,
+                project_zip_download,
+                status,
+            ],
+        )
+        project_zip_button.click(
+            prepare_project_zip,
+            inputs=project,
+            outputs=[project_zip_download, status],
         )
         all_button.click(select_all, inputs=project, outputs=sections)
         none_button.click(clear_selection, inputs=project, outputs=sections)
