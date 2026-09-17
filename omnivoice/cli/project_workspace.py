@@ -163,7 +163,7 @@ def build_project_workspace_demo(
                 gr.update(choices=[], value=None),
                 "en",
                 "Select or create a project.",
-                gr.update(value=None, visible=False),
+                gr.update(value=None),
             )
         project = controller.load_project(project_path)
         settings = controller.load_project_settings(project)
@@ -184,7 +184,7 @@ def build_project_workspace_demo(
             variant_update,
             settings.get("language") or "en",
             f"Loaded {project.manifest.title}.",
-            gr.update(value=None, visible=False),
+            gr.update(value=None),
         )
 
     def refresh_projects(current):
@@ -473,7 +473,7 @@ def build_project_workspace_demo(
         message = f"Prepared ZIP with **{len(result.included)}** generated section audio file(s)."
         if result.skipped:
             message += " Skipped: " + "; ".join(result.skipped) + "."
-        return gr.update(value=str(result.archive), visible=True), message
+        return str(result.archive), message
 
     def delete_project(project_path, confirmed):
         if not project_path:
@@ -544,20 +544,18 @@ def build_project_workspace_demo(
                 scale=6,
             )
             refresh_project = gr.Button("Refresh", scale=1)
-            download_project = gr.Button("Prepare audio ZIP", scale=1)
-        with gr.Row():
-            project_zip = gr.DownloadButton(
-                "Download project audio ZIP",
+            download_project = gr.DownloadButton(
+                "Download audio ZIP",
                 value=None,
-                visible=False,
                 variant="primary",
+                scale=1,
             )
-            confirm_delete = gr.Checkbox(
-                label="Confirm delete",
-                value=False,
-                info="Deletes the selected project folder and all generated project files.",
-            )
-            delete_project_button = gr.Button("Delete project", variant="stop")
+            delete_project_button = gr.Button("Delete project", variant="stop", scale=1)
+        confirm_delete = gr.Checkbox(
+            label="Confirm delete selected project",
+            value=False,
+            info="Deletes the project folder, generated audio, checkpoints and project-local history.",
+        )
         project_header = gr.Markdown(initial_summary)
 
         with gr.Accordion("1 · Script & Project", open=not bool(initial_project)):
@@ -668,7 +666,7 @@ def build_project_workspace_demo(
                 variant,
                 language,
                 render_status,
-                project_zip,
+                download_project,
             ],
         )
         voice.input(variants_for_voice, inputs=voice, outputs=variant)
@@ -733,7 +731,7 @@ def build_project_workspace_demo(
         download_project.click(
             prepare_project_audio_zip,
             inputs=project,
-            outputs=[project_zip, render_status],
+            outputs=[download_project, render_status],
             show_progress="hidden",
         )
         delete_project_button.click(
