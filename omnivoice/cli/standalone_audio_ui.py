@@ -5,8 +5,9 @@
 """Standalone paragraph generation UI for OmniVoice Studio.
 
 This surface intentionally does not create or mutate a Project Studio project.
-It reuses ``StudioCommandService.generate_audio_job`` so saved voices, quality
-presets, artifact metadata and output layout stay aligned with REST/MCP/CLI.
+It reuses ``StudioCommandService.generate_audio_job`` so saved voices, robust
+quality verification, artifact metadata and output layout stay aligned with
+REST/MCP/CLI.
 """
 
 from __future__ import annotations
@@ -76,6 +77,34 @@ def standalone_audio_payload(
     return payload
 
 
+def standalone_audio_status(
+    result: dict[str, Any],
+    *,
+    requested_quality: Optional[str] = None,
+) -> str:
+    """Render a truthful quality summary for a completed Quick Audio run."""
+
+    resolved_voice = result.get("voice_name") or "model default"
+    resolved_variant = result.get("voice_variant") or "default"
+    quality = result.get("quality_preset") or requested_quality or "workspace default"
+    chunk_count = max(1, int(result.get("chunk_count") or 1))
+    unverified_chunks = max(0, int(result.get("unverified_chunks") or 0))
+
+    if result.get("verified"):
+        verification = f"ASR verified across **{chunk_count}** semantic chunk(s)"
+    else:
+        verification = (
+            f"⚠️ **Needs review**: {unverified_chunks or 1}/{chunk_count} chunk(s) "
+            "did not pass ASR verification. Regenerate with **SAFE** before final use"
+        )
+
+    return (
+        f"{verification} · voice **{resolved_voice}/{resolved_variant}** · "
+        f"quality **{quality}** · saved under `artifacts/audio` · "
+        "no project was created."
+    )
+
+
 def build_standalone_audio_demo(
     model: Any,
     workspace: str | Path,
@@ -132,15 +161,9 @@ def build_standalone_audio_demo(
             output_path = artifact.get("path")
             if not output_path:
                 raise RuntimeError("Standalone generation completed without an audio artifact")
-            resolved_voice = result.get("voice_name") or "model default"
-            resolved_variant = result.get("voice_variant") or "default"
             return (
                 str(output_path),
-                (
-                    f"Ready · voice **{resolved_voice}/{resolved_variant}** · "
-                    f"quality **{result.get('quality_preset') or quality}** · "
-                    "saved under `artifacts/audio` · no project was created."
-                ),
+                standalone_audio_status(result, requested_quality=quality),
             )
         except Exception as exc:
             raise gr.Error(f"Quick Audio failed: {type(exc).__name__}: {exc}") from exc
@@ -149,8 +172,8 @@ def build_standalone_audio_demo(
         gr.Markdown(
             """
 ## Quick Audio
-Generate one independent paragraph without creating a project. The WAV is kept
-as a normal Studio artifact, so you can listen to it or download it immediately.
+Generate one independent paragraph without creating a project. Longer text is
+split into semantic chunks, checked with ASR and retried before the WAV is saved.
 """
         )
         with gr.Row():
