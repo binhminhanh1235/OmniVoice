@@ -8,6 +8,7 @@ import soundfile as sf
 from omnivoice.cli.section_export_ui import build_section_export_demo
 from omnivoice.project import OmniVoiceProject
 from omnivoice.section_export import (
+    create_project_audio_archive,
     create_section_mp3_archive,
     export_section_mp3s,
     section_ids,
@@ -94,6 +95,56 @@ def test_export_rejects_empty_or_unknown_selection(tmp_path):
 
     with pytest.raises(ValueError, match="Unknown sections"):
         export_section_mp3s(project, ["S99"])
+
+
+def test_project_audio_archive_keeps_native_bytes_and_manifest_order(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    expected = {}
+    for section_id, payload in (("S01", b"native-one"), ("S02", b"native-two")):
+        section = project.get_section(section_id)
+        wav_path = project.root / "sections" / section_id / f"{section_id}.wav"
+        wav_path.write_bytes(payload)
+        section.audio_file = str(wav_path.relative_to(project.root))
+        section.status = "verified"
+        expected[f"{section_id}.wav"] = payload
+    project.save()
+
+    result = create_project_audio_archive(project)
+    assert result.included == ("S01", "S02")
+    assert result.skipped == ()
+    assert result.archive.exists()
+
+    with zipfile.ZipFile(result.archive) as bundle:
+        assert bundle.namelist() == ["S01.wav", "S02.wav"]
+        for name, payload in expected.items():
+            assert bundle.read(name) == payload
+
+
+def test_project_audio_archive_allows_partial_project(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    section = project.get_section("S01")
+    wav_path = project.root / "sections" / "S01" / "S01.wav"
+    wav_path.write_bytes(b"native-one")
+    section.audio_file = str(wav_path.relative_to(project.root))
+    project.save()
+
+    result = create_project_audio_archive(project)
+    assert result.included == ("S01",)
+    assert result.skipped == ("S02: no generated section audio",)
+
+
+def test_project_audio_archive_rejects_no_audio_and_external_path(tmp_path):
+    project = OmniVoiceProject.create(SCRIPT, tmp_path / "project")
+    with pytest.raises(ValueError, match="no generated section audio"):
+        create_project_audio_archive(project)
+
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"outside")
+    section = project.get_section("S01")
+    section.audio_file = str(outside)
+    project.save()
+    with pytest.raises(ValueError, match="outside project root"):
+        create_project_audio_archive(project)
 
 
 def test_section_export_gradio_smoke(tmp_path):
