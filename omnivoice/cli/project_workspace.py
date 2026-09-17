@@ -649,6 +649,7 @@ def build_project_workspace_demo(
                 render_status,
                 project_header,
             ],
+            show_progress="hidden",
         )
         refresh_generated.click(
             generated_sections,
