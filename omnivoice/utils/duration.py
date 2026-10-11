@@ -203,7 +203,8 @@ class RuleDurationEstimator:
 
     def calculate_total_weight(self, text):
         """Sums up the normalized weights for a string."""
-        return sum(self._get_char_weight(c) for c in text)
+        # Map pushes the string iteration loop down to C instead of using a Python generator.
+        return sum(map(self._get_char_weight, text))
 
     def estimate_duration(
         self,
