@@ -162,6 +162,9 @@ class RuleDurationEstimator:
         ]
         self.breakpoints = [r[0] for r in self.ranges]
 
+        # Precompute weights for ASCII characters to speed up the hot path.
+        self._ascii_cache = [self._get_char_weight(chr(i)) for i in range(128)]
+
     @lru_cache(maxsize=4096)
     def _get_char_weight(self, char):
         """Determines the weight of a single character."""
@@ -203,7 +206,14 @@ class RuleDurationEstimator:
 
     def calculate_total_weight(self, text):
         """Sums up the normalized weights for a string."""
-        return sum(self._get_char_weight(c) for c in text)
+        total = 0.0
+        for c in text:
+            code = ord(c)
+            if code < 128:
+                total += self._ascii_cache[code]
+            else:
+                total += self._get_char_weight(c)
+        return total
 
     def estimate_duration(
         self,
