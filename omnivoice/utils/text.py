@@ -31,6 +31,8 @@ from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
 
 SPLIT_PUNCTUATION = set(".,;:!?。，；：！？")
 CLOSING_MARKS = set("\"'“”‘’）]》>」】")
@@ -218,7 +220,7 @@ def add_punctuation(text: str):
         return text
 
     if text[-1] not in END_PUNCTUATION:
-        is_chinese = any("\u4e00" <= char <= "\u9fff" for char in text)
+        is_chinese = bool(_CJK_RE.search(text))
 
         text += "。" if is_chinese else "."
 
@@ -246,7 +248,6 @@ def add_punctuation(text: str):
 _BRACKET_TAG_RE = re.compile(r"\[[^\[\]]*\]")
 # Uppercase pinyin followed by a tone digit 1-5 (Chinese pronunciation control).
 _PINYIN_TONE_RE = re.compile(r"[A-Z]+[1-5]")
-_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 _TN_INSTALL_MSG = (
     "Text normalization (normalize_text=True) requires WeTextProcessing, which "
