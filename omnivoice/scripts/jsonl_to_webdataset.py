@@ -267,7 +267,10 @@ def process_single_shard(
 
 def count_lines(path):
     with open(path, "rb") as f:
-        return sum(buf.count(b"\n") for buf in iter(lambda: f.read(1 << 20), b""))
+        count = 0
+        while buf := f.read(1 << 20):
+            count += buf.count(b"\n")
+        return count
 
 
 def pack_dataset(
