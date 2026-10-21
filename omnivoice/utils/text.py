@@ -218,7 +218,7 @@ def add_punctuation(text: str):
         return text
 
     if text[-1] not in END_PUNCTUATION:
-        is_chinese = any("\u4e00" <= char <= "\u9fff" for char in text)
+        is_chinese = bool(_CJK_RE.search(text))
 
         text += "。" if is_chinese else "."
 

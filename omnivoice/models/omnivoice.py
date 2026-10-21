@@ -76,6 +76,7 @@ from omnivoice.utils.audio import (
 from omnivoice.utils.duration import RuleDurationEstimator
 from omnivoice.utils.lang_map import LANG_IDS, LANG_NAMES
 from omnivoice.utils.text import (
+    _CJK_RE,
     add_punctuation,
     chunk_text_punctuation,
     normalize_text as _normalize_text,
@@ -1698,7 +1699,7 @@ def _resolve_instruct(
         )
 
     # Determine separator based on language
-    has_zh = any(any("\u4e00" <= c <= "\u9fff" for c in n) for n in normalised)
+    has_zh = any(bool(_CJK_RE.search(n)) for n in normalised)
     separator = "，" if has_zh else ", "
 
     return separator.join(normalised)
