@@ -88,6 +88,24 @@ def test_render_keeps_sections_and_status_visible_while_streaming():
     assert "section_selection" in render_binding
 
 
+def test_project_workspace_has_native_zip_download_and_delete_controls():
+    source = inspect.getsource(build_project_workspace_demo)
+    assert "download_project = gr.DownloadButton(" in source
+    assert '"Download audio ZIP"' in source
+    assert 'gr.Button("Delete project", variant="stop"' in source
+    assert "create_project_audio_archive(project)" in source
+    assert "shutil.rmtree(project_root)" in source
+    assert "export_section_mp3s" not in source
+
+
+def test_project_delete_requires_confirmation_and_stays_inside_projects_root():
+    source = inspect.getsource(build_project_workspace_demo)
+    assert "if not confirmed:" in source
+    assert 'raise gr.Error("Confirm project deletion first.")' in source
+    assert "project_root.relative_to(projects_root)" in source
+    assert 'not (project_root / "project.json").exists()' in source
+
+
 def test_primary_launcher_imports_after_navigation_consolidation():
     from omnivoice.cli import project_studio_voice_doctor as launcher
 

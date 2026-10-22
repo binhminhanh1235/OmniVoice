@@ -13,11 +13,13 @@ production flow: Script -> Voice/Preview -> Render -> Review -> Export.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from omnivoice.cli.project_studio import _LANGUAGE_CHOICES
 from omnivoice.preview import ProjectPreviewGenerator
+from omnivoice.section_export import create_project_audio_archive
 
 
 def _section_labels(project: Any) -> list[str]:
@@ -161,6 +163,7 @@ def build_project_workspace_demo(
                 gr.update(choices=[], value=None),
                 "en",
                 "Select or create a project.",
+                gr.update(value=None),
             )
         project = controller.load_project(project_path)
         settings = controller.load_project_settings(project)
@@ -181,6 +184,7 @@ def build_project_workspace_demo(
             variant_update,
             settings.get("language") or "en",
             f"Loaded {project.manifest.title}.",
+            gr.update(value=None),
         )
 
     def refresh_projects(current):
@@ -458,6 +462,46 @@ def build_project_workspace_demo(
             f"Regenerated {chunk_label.split(' · ', 1)[0]}.",
         )
 
+    def prepare_project_audio_zip(project_path):
+        if not project_path:
+            raise gr.Error("Select a project first.")
+        try:
+            project = controller.load_project(project_path)
+            result = create_project_audio_archive(project)
+        except Exception as exc:
+            raise gr.Error(f"Project audio ZIP failed: {type(exc).__name__}: {exc}")
+        message = f"Prepared ZIP with **{len(result.included)}** generated section audio file(s)."
+        if result.skipped:
+            message += " Skipped: " + "; ".join(result.skipped) + "."
+        return str(result.archive), message
+
+    def delete_project(project_path, confirmed):
+        if not project_path:
+            raise gr.Error("Select a project first.")
+        if not confirmed:
+            raise gr.Error("Confirm project deletion first.")
+
+        project = controller.load_project(project_path)
+        project_root = project.root.resolve()
+        projects_root = controller.projects_root.resolve()
+        try:
+            project_root.relative_to(projects_root)
+        except ValueError as exc:
+            raise gr.Error("Refusing to delete a project outside the Studio projects directory.") from exc
+
+        if project_root == projects_root or not (project_root / "project.json").exists():
+            raise gr.Error("Refusing to delete an invalid project directory.")
+
+        title = project.manifest.title
+        shutil.rmtree(project_root)
+        items = controller.list_projects()
+        next_project = items[0] if items else None
+        return (
+            gr.update(choices=items, value=next_project),
+            False,
+            f"Deleted project **{title}**.",
+        )
+
     def merge(project_path, allow_unverified):
         if not project_path:
             raise gr.Error("Select a project first.")
@@ -500,6 +544,18 @@ def build_project_workspace_demo(
                 scale=6,
             )
             refresh_project = gr.Button("Refresh", scale=1)
+            download_project = gr.DownloadButton(
+                "Download audio ZIP",
+                value=None,
+                variant="primary",
+                scale=1,
+            )
+            delete_project_button = gr.Button("Delete project", variant="stop", scale=1)
+        confirm_delete = gr.Checkbox(
+            label="Confirm delete selected project",
+            value=False,
+            info="Deletes the project folder, generated audio, checkpoints and project-local history.",
+        )
         project_header = gr.Markdown(initial_summary)
 
         with gr.Accordion("1 · Script & Project", open=not bool(initial_project)):
@@ -610,6 +666,7 @@ def build_project_workspace_demo(
                 variant,
                 language,
                 render_status,
+                download_project,
             ],
         )
         voice.input(variants_for_voice, inputs=voice, outputs=variant)
@@ -670,6 +727,17 @@ def build_project_workspace_demo(
             regenerate_chunk,
             inputs=[project, chunk_picker, voice, variant, language, strict],
             outputs=[section_audio, chunk_picker, status_table, project_header, render_status],
+        )
+        download_project.click(
+            prepare_project_audio_zip,
+            inputs=project,
+            outputs=[download_project, render_status],
+            show_progress="hidden",
+        )
+        delete_project_button.click(
+            delete_project,
+            inputs=[project, confirm_delete],
+            outputs=[project, confirm_delete, render_status],
         )
         merge_button.click(
             merge,
