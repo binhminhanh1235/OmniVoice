@@ -1698,7 +1698,7 @@ def _resolve_instruct(
         )
 
     # Determine separator based on language
-    has_zh = any(any("\u4e00" <= c <= "\u9fff" for c in n) for n in normalised)
+    has_zh = any(bool(_ZH_RE.search(n)) for n in normalised)
     separator = "，" if has_zh else ", "
 
     return separator.join(normalised)
